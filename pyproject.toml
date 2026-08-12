@@ -1,0 +1,22 @@
+[project]
+name = "stock-factor"
+version = "0.1.0"
+description = "Quant factor research service"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.111",
+  "filelock>=3.15",
+  "httpx>=0.27",
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.2"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
