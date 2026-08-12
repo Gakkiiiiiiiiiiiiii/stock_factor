@@ -8,7 +8,7 @@ from stock_factor.application.service import FactorApplication
 
 
 class MiningJobRequest(BaseModel):
-    symbols: list[str] = Field(min_length=1)
+    symbols: list[str] = Field(default_factory=list)
     start: str | None = None
     end: str | None = None
     days: int | None = Field(default=365, ge=60)
@@ -54,7 +54,9 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
 
     @app.post("/api/v1/mining/jobs")
     def create_mining_job(request: MiningJobRequest) -> dict:
-        return {"contract_version": "factor.v1", "data": application.create_mining_job(request.model_dump())}
+        payload = request.model_dump()
+        payload["symbols"] = payload["symbols"] or ["000001.SH", "399001.SZ"]
+        return {"contract_version": "factor.v1", "data": application.create_mining_job(payload)}
 
     @app.get("/api/v1/mining/jobs/{job_id}")
     def get_mining_job(job_id: str) -> dict:
