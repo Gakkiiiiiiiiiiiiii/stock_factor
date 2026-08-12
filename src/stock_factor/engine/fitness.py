@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+
+TRADING_DAYS_PER_YEAR = 250
+TURNOVER_COST = 0.001
+
+
+@dataclass(frozen=True)
+class EvaluationThresholds:
+    min_coverage: float = 0.6
+    min_rank_ic: float = 0.02
+    min_icir: float = 0.3
+    min_topk_excess_annual_return: float = 0.0
+
+
+def rank(values: np.ndarray) -> np.ndarray:
+    out = np.full(values.shape, np.nan)
+    valid = ~np.isnan(values)
+    count = int(valid.sum())
+    if count:
+        order = np.argsort(values[valid], kind="mergesort")
+        ranked = np.empty(count)
+        ranked[order] = (np.arange(count) + 1) / count
+        out[valid] = ranked
+    return out
+
+
+def evaluate_factor(
+    factor_panel: np.ndarray,
+    closes: np.ndarray,
+    horizon: int = 5,
+    top_k: int | None = None,
+    eval_window: int | None = None,
+    thresholds: EvaluationThresholds | None = None,
+) -> dict:
+    end = max(0, factor_panel.shape[1] - horizon)
+    start = max(0, end - eval_window) if eval_window else 0
+    return evaluate_factor_range(factor_panel, closes, start, end, horizon, top_k, thresholds)
+
+
+def evaluate_factor_range(
+    factor_panel: np.ndarray,
+    closes: np.ndarray,
+    eval_start: int,
+    eval_end: int,
+    horizon: int = 5,
+    top_k: int | None = None,
+    thresholds: EvaluationThresholds | None = None,
+) -> dict:
+    thresholds = thresholds or EvaluationThresholds()
+    symbols, days = factor_panel.shape
+    start, end = max(0, eval_start), min(eval_end, days - horizon)
+    if end <= start:
+        return {"passed": False, "coverage": 0.0, "fitness": float("-inf"), "warning": "eval range too short"}
+    forward = np.full((symbols, days), np.nan)
+    forward[:, :-horizon] = closes[:, horizon:] / closes[:, :-horizon] - 1
+    ics, rank_ics, periods = [], [], []
+    selected = top_k or max(5, int(symbols * 0.01))
+    last_day = start - horizon
+    previous: set[int] | None = None
+    for day in range(start, end):
+        factor, returns = factor_panel[:, day], forward[:, day]
+        valid = ~np.isnan(factor) & ~np.isnan(returns)
+        if valid.sum() < 10 or np.std(factor[valid]) < 1e-12 or np.std(returns[valid]) < 1e-12:
+            continue
+        ics.append(float(np.corrcoef(factor[valid], returns[valid])[0, 1]))
+        rank_ics.append(float(np.corrcoef(rank(factor[valid]), rank(returns[valid]))[0, 1]))
+        if day - last_day < horizon:
+            continue
+        last_day = day
+        indexes = np.where(valid)[0]
+        chosen = set(indexes[np.argsort(factor[valid])[-min(selected, int(valid.sum())) :]].tolist())
+        turnover = 1.0 if previous is None else len(chosen - previous) / max(len(chosen), 1)
+        periods.append((float(np.mean(forward[list(chosen), day])) - TURNOVER_COST * turnover, float(np.mean(returns[valid]))))
+        previous = chosen
+    coverage = len(ics) / (end - start)
+    if coverage < thresholds.min_coverage or not rank_ics:
+        return {"rank_ic": 0.0, "ic_mean": 0.0, "icir": 0.0, "coverage": round(coverage, 4), "fitness": float("-inf"), "passed": False, "evaluated_days": end - start, "valid_ic_days": len(ics)}
+    rank_ic, ic_mean = float(np.mean(rank_ics)), float(np.mean(ics))
+    deviation = float(np.std(rank_ics))
+    icir = rank_ic / (deviation if deviation > 1e-12 else 0.01)
+    annual = float(np.mean([item[0] for item in periods]) * TRADING_DAYS_PER_YEAR / horizon) if periods else 0.0
+    benchmark = float(np.mean([item[1] for item in periods]) * TRADING_DAYS_PER_YEAR / horizon) if periods else 0.0
+    excess = annual - benchmark
+    passed = rank_ic >= thresholds.min_rank_ic and icir >= thresholds.min_icir and excess > thresholds.min_topk_excess_annual_return
+    return {"rank_ic": round(rank_ic, 4), "ic_mean": round(ic_mean, 4), "icir": round(icir, 4), "coverage": round(coverage, 4), "topk_annual_return": round(annual, 4), "benchmark_annual_return": round(benchmark, 4), "topk_excess_annual_return": round(excess, 4), "fitness": round(5 * rank_ic + 0.5 * icir + excess, 4), "evaluated_days": end - start, "valid_ic_days": len(ics), "top_k": selected, "passed": bool(passed)}
