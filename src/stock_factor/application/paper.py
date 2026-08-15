@@ -86,6 +86,10 @@ class PaperTradingService:
         prices = market_prices or {}
         cash = float(state["cash"])
         positions = dict(state["positions"])
+        for position in positions.values():
+            for lot in position.get("lots") or []:
+                if str(lot.get("buy_date") or "") < as_of:
+                    lot["available_quantity"] = int(lot.get("quantity") or 0)
         frozen = list(state["frozen_orders"])
         fills: list[dict] = []
         risks: list[dict] = []
@@ -130,6 +134,15 @@ class PaperTradingService:
                 int(order.get("lot_size") or 100), 1
             )
             quantity = desired_qty - current_qty if side == "BUY" else -current_qty
+            if quantity < 0:
+                lots = list(existing.get("lots") or [])
+                if lots:
+                    sellable = sum(
+                        int(lot.get("available_quantity", lot.get("quantity", 0)) or 0)
+                        for lot in lots
+                        if str(lot.get("buy_date") or "") < as_of
+                    )
+                    quantity = -min(abs(quantity), sellable)
             if quantity == 0:
                 fills.append({**order, "status": "NO_CHANGE", "filled_quantity": 0, "as_of": as_of})
                 continue
@@ -164,6 +177,19 @@ class PaperTradingService:
                     "last_price": raw_price,
                     "realized_pnl": float(existing.get("realized_pnl") or 0.0)
                     + ((execution_price - avg_cost) * abs(quantity) - costs if quantity < 0 else 0.0),
+                    "lots": (
+                        [
+                            *list(existing.get("lots") or []),
+                            {
+                                "buy_date": as_of,
+                                "quantity": quantity,
+                                "available_quantity": 0,
+                                "cost_price": execution_price,
+                            },
+                        ]
+                        if quantity > 0
+                        else list(existing.get("lots") or [])
+                    ),
                 }
             else:
                 positions.pop(order["symbol"], None)
