@@ -12,7 +12,9 @@ class PurgedWindow:
     embargo: int
 
 
-def build_purged_windows(n_days: int, horizon: int = 5, n_windows: int = 3, embargo: int | None = None) -> list[PurgedWindow]:
+def build_purged_windows(
+    n_days: int, horizon: int = 5, n_windows: int = 3, embargo: int | None = None
+) -> list[PurgedWindow]:
     purge = int(horizon)
     embargo = purge if embargo is None else int(embargo)
     min_block = purge + embargo + horizon + horizon + 2
@@ -32,4 +34,3 @@ def build_purged_windows(n_days: int, horizon: int = 5, n_windows: int = 3, emba
         if len(windows) >= n_windows:
             break
     return windows
-

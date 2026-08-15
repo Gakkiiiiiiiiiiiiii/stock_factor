@@ -40,4 +40,3 @@ def _failure_reasons(results: dict) -> list[str]:
         if not metrics.get("passed"):
             reasons.append(f"{name}_failed")
     return reasons
-

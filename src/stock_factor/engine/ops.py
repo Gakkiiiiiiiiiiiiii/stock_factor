@@ -81,9 +81,7 @@ def _pair(a: np.ndarray, b: np.ndarray, window: int, correlation: bool) -> np.nd
 
     out = np.full(a.shape, np.nan, dtype=float)
     if a.shape[1] >= window:
-        out[:, window - 1 :] = calculate(
-            sliding_window_view(a, window, axis=1), sliding_window_view(b, window, axis=1)
-        )
+        out[:, window - 1 :] = calculate(sliding_window_view(a, window, axis=1), sliding_window_view(b, window, axis=1))
     return out
 
 
@@ -129,17 +127,23 @@ def get_op(token: str) -> tuple[object, int] | None:
         }[token], 1
     if token in UNARY_OPS:
         return {
-            "neg": lambda x: -x, "abs": np.abs,
+            "neg": lambda x: -x,
+            "abs": np.abs,
             "log": lambda x: np.where(x > 0, np.log(np.where(x > 0, x, 1)), np.nan),
             "sqrt": lambda x: np.where(x >= 0, np.sqrt(np.maximum(x, 0)), np.nan),
-            "sign": np.sign, "signedpower": lambda x: np.sign(x) * x * x,
+            "sign": np.sign,
+            "signedpower": lambda x: np.sign(x) * x * x,
         }[token], 1
     if token in BINARY_OPS:
         return {
-            "add": lambda a, b: a + b, "sub": lambda a, b: a - b, "mul": lambda a, b: a * b,
+            "add": lambda a, b: a + b,
+            "sub": lambda a, b: a - b,
+            "mul": lambda a, b: a * b,
             "div": lambda a, b: np.where(np.abs(b) < _EPS, np.nan, a / np.where(np.abs(b) < _EPS, 1, b)),
-            "gt": lambda a, b: (a > b).astype(float), "lt": lambda a, b: (a < b).astype(float),
-            "max": np.maximum, "min": np.minimum,
+            "gt": lambda a, b: (a > b).astype(float),
+            "lt": lambda a, b: (a < b).astype(float),
+            "max": np.maximum,
+            "min": np.minimum,
         }[token], 2
     if token in TERNARY_OPS:
         return (lambda condition, left, right: np.where(condition > 0, left, right)), 3

@@ -48,4 +48,3 @@ def resolve_research_window_requirement(
 
 
 __all__ = ["ResearchWindowRequirement", "resolve_research_window_requirement"]
-

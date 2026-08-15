@@ -15,9 +15,12 @@ def test_market_provider_reads_agent_batch_contract(monkeypatch):
             json={
                 "contract_version": "market-data.v1",
                 "data": {
-                    "symbols": ["600000"], "dates": ["2026-08-10"],
-                    "bars": {"close": [[10.0]]}, "data_version": "v1",
-                    "data_snapshot_id": "s1", "source": "fixture",
+                    "symbols": ["600000"],
+                    "dates": ["2026-08-10"],
+                    "bars": {"close": [[10.0]]},
+                    "data_version": "v1",
+                    "data_snapshot_id": "s1",
+                    "source": "fixture",
                 },
             },
             request=httpx.Request("POST", url),
@@ -32,13 +35,40 @@ def test_market_provider_reads_agent_batch_contract(monkeypatch):
 
 def test_feature_panel_maps_content_v2_fields_at_available_time():
     snapshot = MarketDataSnapshot(
-        ["600000"], ["2026-08-10", "2026-08-11"],
-        {"open": [[10, 11]], "high": [[11, 12]], "low": [[9, 10]], "close": [[10, 11]], "volume": [[2, 2]], "amount": [[20, 22]], "turnover": [[1, 1]]},
-        "v1", "s1", "fixture",
+        ["600000"],
+        ["2026-08-10", "2026-08-11"],
+        {
+            "open": [[10, 11]],
+            "high": [[11, 12]],
+            "low": [[9, 10]],
+            "close": [[10, 11]],
+            "volume": [[2, 2]],
+            "amount": [[20, 22]],
+            "turnover": [[1, 1]],
+        },
+        "v1",
+        "s1",
+        "fixture",
     )
     signals = [
-        {"symbol": "600000", "subject_key": "600000", "available_from": "2026-08-10T09:00:00+00:00", "knowledge_kind": "CAUSAL_THESIS", "sentiment": "BULLISH", "truth_status": "EXTERNALLY_VERIFIED", "source_video_id": "v1"},
-        {"symbol": "600000", "subject_key": "600000", "available_from": "2026-08-10T09:00:00+00:00", "knowledge_kind": "RISK_CONDITION", "sentiment": "BEARISH", "truth_status": "EXTERNALLY_VERIFIED", "source_video_id": "v2"},
+        {
+            "symbol": "600000",
+            "subject_key": "600000",
+            "available_from": "2026-08-10T09:00:00+00:00",
+            "knowledge_kind": "CAUSAL_THESIS",
+            "sentiment": "BULLISH",
+            "truth_status": "EXTERNALLY_VERIFIED",
+            "source_video_id": "v1",
+        },
+        {
+            "symbol": "600000",
+            "subject_key": "600000",
+            "available_from": "2026-08-10T09:00:00+00:00",
+            "knowledge_kind": "RISK_CONDITION",
+            "sentiment": "BEARISH",
+            "truth_status": "EXTERNALLY_VERIFIED",
+            "source_video_id": "v2",
+        },
     ]
     panel = build_feature_panel(snapshot, signals)
     assert panel["event_heat"].tolist() == [[0.0, 2.0]]

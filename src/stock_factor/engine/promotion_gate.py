@@ -3,6 +3,7 @@
 Keeping this decision separate from the miner prevents a caller from treating a
 successful walk-forward run as an implicit production approval.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -53,7 +54,10 @@ def evaluate_promotion_gate(
             reasons.append("IC_DECAY_FAILED")
     if not exposure:
         reasons.append("EXPOSURE_MISSING")
-    elif exposure.get("liquidity_exposure") is not None and abs(float(exposure["liquidity_exposure"])) > max_abs_liquidity_exposure:
+    elif (
+        exposure.get("liquidity_exposure") is not None
+        and abs(float(exposure["liquidity_exposure"])) > max_abs_liquidity_exposure
+    ):
         reasons.append("LIQUIDITY_EXPOSURE_FAILED")
     if not capacity:
         reasons.append("CAPACITY_MISSING")
@@ -73,4 +77,3 @@ def evaluate_promotion_gate(
         },
         reject_reasons=reasons,
     )
-

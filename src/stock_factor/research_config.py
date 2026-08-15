@@ -8,6 +8,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict
 
+
 def project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -199,21 +200,47 @@ def _apply_env_overrides(data: dict[str, Any]) -> dict[str, Any]:
     _set_nested(merged, "recent_alpha.min_coverage", _env_float("FACTOR_RECENT_ALPHA_MIN_COVERAGE"))
     _set_nested(merged, "recent_alpha.min_rank_ic", _env_float("FACTOR_RECENT_ALPHA_MIN_RANK_IC"))
     _set_nested(merged, "recent_alpha.min_icir", _env_float("FACTOR_RECENT_ALPHA_MIN_ICIR"))
-    _set_nested(merged, "recent_alpha.min_topk_excess_annual_return", _env_float("FACTOR_RECENT_ALPHA_MIN_TOPK_EXCESS_ANNUAL_RETURN"))
+    _set_nested(
+        merged,
+        "recent_alpha.min_topk_excess_annual_return",
+        _env_float("FACTOR_RECENT_ALPHA_MIN_TOPK_EXCESS_ANNUAL_RETURN"),
+    )
     _set_nested(merged, "recent_alpha.min_recent_test_rank_ic", _env_float("FACTOR_RECENT_ALPHA_MIN_TEST_RANK_IC"))
-    _set_nested(merged, "recent_alpha.min_recent_test_excess_return", _env_float("FACTOR_RECENT_ALPHA_MIN_TEST_EXCESS_RETURN"))
+    _set_nested(
+        merged, "recent_alpha.min_recent_test_excess_return", _env_float("FACTOR_RECENT_ALPHA_MIN_TEST_EXCESS_RETURN")
+    )
     _set_nested(merged, "purged_walkforward.n_windows", _env_int("FACTOR_OOS_N_WINDOWS"))
     _set_nested(merged, "purged_walkforward.embargo_days", _env_int("FACTOR_OOS_EMBARGO_DAYS"))
     _set_nested(merged, "paper_trading.scoring_panel_days", _env_int("FACTOR_PAPER_SCORING_PANEL_DAYS"))
     _set_nested(merged, "paper_trading.mining_panel_days", _env_int("FACTOR_PAPER_MINING_PANEL_DAYS"))
     _set_nested(merged, "paper_trading.remine_days", _env_int("FACTOR_PAPER_REMINE_DAYS"))
     _set_nested(merged, "paper_trading.scoring_buffer_days", _env_int("FACTOR_PAPER_SCORING_BUFFER_DAYS"))
-    _set_nested(merged, "paper_trading.min_quote_transport_coverage", _env_float("FACTOR_PAPER_MIN_QUOTE_TRANSPORT_COVERAGE"))
-    _set_nested(merged, "paper_trading.min_price_limit_meta_coverage", _env_float("FACTOR_PAPER_MIN_PRICE_LIMIT_META_COVERAGE"))
-    _set_nested(merged, "paper_trading.fail_on_low_quote_transport_coverage", _env_bool("FACTOR_PAPER_FAIL_ON_LOW_QUOTE_TRANSPORT_COVERAGE"))
-    _set_nested(merged, "paper_trading.fail_on_low_price_limit_meta_coverage", _env_bool("FACTOR_PAPER_FAIL_ON_LOW_PRICE_LIMIT_META_COVERAGE"))
-    _set_nested(merged, "paper_trading.fail_on_invalid_price_limit_meta", _env_bool("FACTOR_PAPER_FAIL_ON_INVALID_PRICE_LIMIT_META"))
-    _set_nested(merged, "backtest.fail_on_invalid_price_limit_meta", _env_bool("FACTOR_BACKTEST_FAIL_ON_INVALID_PRICE_LIMIT_META"))
+    _set_nested(
+        merged, "paper_trading.min_quote_transport_coverage", _env_float("FACTOR_PAPER_MIN_QUOTE_TRANSPORT_COVERAGE")
+    )
+    _set_nested(
+        merged, "paper_trading.min_price_limit_meta_coverage", _env_float("FACTOR_PAPER_MIN_PRICE_LIMIT_META_COVERAGE")
+    )
+    _set_nested(
+        merged,
+        "paper_trading.fail_on_low_quote_transport_coverage",
+        _env_bool("FACTOR_PAPER_FAIL_ON_LOW_QUOTE_TRANSPORT_COVERAGE"),
+    )
+    _set_nested(
+        merged,
+        "paper_trading.fail_on_low_price_limit_meta_coverage",
+        _env_bool("FACTOR_PAPER_FAIL_ON_LOW_PRICE_LIMIT_META_COVERAGE"),
+    )
+    _set_nested(
+        merged,
+        "paper_trading.fail_on_invalid_price_limit_meta",
+        _env_bool("FACTOR_PAPER_FAIL_ON_INVALID_PRICE_LIMIT_META"),
+    )
+    _set_nested(
+        merged,
+        "backtest.fail_on_invalid_price_limit_meta",
+        _env_bool("FACTOR_BACKTEST_FAIL_ON_INVALID_PRICE_LIMIT_META"),
+    )
     _set_nested(merged, "walkforward.gap_policy", os.getenv("FACTOR_WALKFORWARD_GAP_POLICY"))
     _set_nested(merged, "walkforward.overlapping_target_policy", os.getenv("FACTOR_WALKFORWARD_OVERLAP_POLICY"))
     _set_nested(merged, "walkforward.retry_unfilled_target", _env_bool("FACTOR_WALKFORWARD_RETRY_UNFILLED_TARGET"))
@@ -267,4 +294,3 @@ __all__ = [
     "WalkForwardConfig",
     "get_research_config",
 ]
-

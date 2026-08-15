@@ -1,4 +1,5 @@
 """Deterministic diagnostics used by the factor statistical gate."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -43,14 +44,16 @@ def compute_turnover(factor_panel: np.ndarray, top_k: int) -> float:
         valid = np.where(np.isfinite(values[:, day]))[0]
         if not len(valid):
             continue
-        current = set(valid[np.argsort(values[valid, day], kind="mergesort")[-min(top_k, len(valid)):]].tolist())
+        current = set(valid[np.argsort(values[valid, day], kind="mergesort")[-min(top_k, len(valid)) :]].tolist())
         if previous is not None:
             changes.append(len(current - previous) / max(len(current), 1))
         previous = current
     return round(float(np.mean(changes)), 8) if changes else 0.0
 
 
-def compute_capacity_proxy(volumes: np.ndarray, selected_weights: np.ndarray | None = None, participation_rate: float = .1) -> dict:
+def compute_capacity_proxy(
+    volumes: np.ndarray, selected_weights: np.ndarray | None = None, participation_rate: float = 0.1
+) -> dict:
     volume = np.asarray(volumes, dtype=float)
     if volume.ndim != 2:
         raise ValueError("volumes must be 2D")
@@ -61,5 +64,8 @@ def compute_capacity_proxy(volumes: np.ndarray, selected_weights: np.ndarray | N
         weights = np.asarray(selected_weights, dtype=float)
         valid = weights[np.isfinite(weights) & (weights > 0)]
         concentration = float(np.max(valid) / np.sum(valid)) if valid.size and np.sum(valid) else None
-    return {"daily_notional_capacity_proxy": round(daily_capacity, 6), "participation_rate": participation_rate, "max_weight_concentration": concentration}
-
+    return {
+        "daily_notional_capacity_proxy": round(daily_capacity, 6),
+        "participation_rate": participation_rate,
+        "max_weight_concentration": concentration,
+    }

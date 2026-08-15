@@ -66,4 +66,3 @@ def build_research_split(n_days: int, config: DataSplitConfig, horizon: int) -> 
 
 
 __all__ = ["FactorResearchSplit", "build_research_split"]
-

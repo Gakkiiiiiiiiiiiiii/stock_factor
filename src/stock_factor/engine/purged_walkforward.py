@@ -17,11 +17,15 @@ def run_purged_walkforward(
 ) -> dict:
     config = get_research_config().purged_walkforward
     eval_start = 0 if eval_start is None else max(0, int(eval_start))
-    eval_end = min(factor_panel.shape[1] - horizon, int(eval_end) if eval_end is not None else factor_panel.shape[1] - horizon)
+    eval_end = min(
+        factor_panel.shape[1] - horizon, int(eval_end) if eval_end is not None else factor_panel.shape[1] - horizon
+    )
     n_windows = n_windows or config.n_windows
     embargo = config.embargo_days if embargo is None else embargo
     windows = []
-    for index, (start, end) in enumerate(_build_eval_windows(eval_start, eval_end, n_windows=n_windows, embargo=embargo)):
+    for index, (start, end) in enumerate(
+        _build_eval_windows(eval_start, eval_end, n_windows=n_windows, embargo=embargo)
+    ):
         if end + horizon > factor_panel.shape[1]:
             metrics = {"passed": False, "warning": "insufficient future horizon for test window"}
         else:
@@ -35,19 +39,24 @@ def run_purged_walkforward(
         history_range = (0, max(eval_start, start - (embargo or 0)))
         embargo_range = (history_range[1], start)
         test_range = (start, end)
-        windows.append({
-            "history_range": history_range,
-            "embargo_range": embargo_range,
-            "test_range": test_range,
-            "train": history_range,
-            "validation": embargo_range,
-            "test": test_range,
-            "window_index": index,
-            "metrics": metrics,
-            "passed": bool(metrics.get("passed")),
-        })
+        windows.append(
+            {
+                "history_range": history_range,
+                "embargo_range": embargo_range,
+                "test_range": test_range,
+                "train": history_range,
+                "validation": embargo_range,
+                "test": test_range,
+                "window_index": index,
+                "metrics": metrics,
+                "passed": bool(metrics.get("passed")),
+            }
+        )
     rank_ics = [float(item["metrics"].get("rank_ic") or 0.0) for item in windows]
-    excess = [float(item["metrics"].get("topk_excess_annual_return", item["metrics"].get("topk_excess_return") or 0.0)) for item in windows]
+    excess = [
+        float(item["metrics"].get("topk_excess_annual_return", item["metrics"].get("topk_excess_return") or 0.0))
+        for item in windows
+    ]
     positive = [value > 0 for value in rank_ics]
     window_pass_ratio = sum(1 for item in windows if item.get("passed")) / len(windows) if windows else 0.0
     positive_rank_ic_ratio = sum(positive) / len(positive) if positive else 0.0
@@ -92,4 +101,3 @@ def _build_eval_windows(eval_start: int, eval_end: int, n_windows: int, embargo:
         if cursor >= eval_end:
             break
     return windows
-

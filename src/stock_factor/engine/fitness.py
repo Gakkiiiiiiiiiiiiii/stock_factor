@@ -74,16 +74,44 @@ def evaluate_factor_range(
         indexes = np.where(valid)[0]
         chosen = set(indexes[np.argsort(factor[valid])[-min(selected, int(valid.sum())) :]].tolist())
         turnover = 1.0 if previous is None else len(chosen - previous) / max(len(chosen), 1)
-        periods.append((float(np.mean(forward[list(chosen), day])) - TURNOVER_COST * turnover, float(np.mean(returns[valid]))))
+        periods.append(
+            (float(np.mean(forward[list(chosen), day])) - TURNOVER_COST * turnover, float(np.mean(returns[valid])))
+        )
         previous = chosen
     coverage = len(ics) / (end - start)
     if coverage < thresholds.min_coverage or not rank_ics:
-        return {"rank_ic": 0.0, "ic_mean": 0.0, "icir": 0.0, "coverage": round(coverage, 4), "fitness": float("-inf"), "passed": False, "evaluated_days": end - start, "valid_ic_days": len(ics)}
+        return {
+            "rank_ic": 0.0,
+            "ic_mean": 0.0,
+            "icir": 0.0,
+            "coverage": round(coverage, 4),
+            "fitness": float("-inf"),
+            "passed": False,
+            "evaluated_days": end - start,
+            "valid_ic_days": len(ics),
+        }
     rank_ic, ic_mean = float(np.mean(rank_ics)), float(np.mean(ics))
     deviation = float(np.std(rank_ics))
     icir = rank_ic / (deviation if deviation > 1e-12 else 0.01)
     annual = float(np.mean([item[0] for item in periods]) * TRADING_DAYS_PER_YEAR / horizon) if periods else 0.0
     benchmark = float(np.mean([item[1] for item in periods]) * TRADING_DAYS_PER_YEAR / horizon) if periods else 0.0
     excess = annual - benchmark
-    passed = rank_ic >= thresholds.min_rank_ic and icir >= thresholds.min_icir and excess > thresholds.min_topk_excess_annual_return
-    return {"rank_ic": round(rank_ic, 4), "ic_mean": round(ic_mean, 4), "icir": round(icir, 4), "coverage": round(coverage, 4), "topk_annual_return": round(annual, 4), "benchmark_annual_return": round(benchmark, 4), "topk_excess_annual_return": round(excess, 4), "fitness": round(5 * rank_ic + 0.5 * icir + excess, 4), "evaluated_days": end - start, "valid_ic_days": len(ics), "top_k": selected, "passed": bool(passed)}
+    passed = (
+        rank_ic >= thresholds.min_rank_ic
+        and icir >= thresholds.min_icir
+        and excess > thresholds.min_topk_excess_annual_return
+    )
+    return {
+        "rank_ic": round(rank_ic, 4),
+        "ic_mean": round(ic_mean, 4),
+        "icir": round(icir, 4),
+        "coverage": round(coverage, 4),
+        "topk_annual_return": round(annual, 4),
+        "benchmark_annual_return": round(benchmark, 4),
+        "topk_excess_annual_return": round(excess, 4),
+        "fitness": round(5 * rank_ic + 0.5 * icir + excess, 4),
+        "evaluated_days": end - start,
+        "valid_ic_days": len(ics),
+        "top_k": selected,
+        "passed": bool(passed),
+    }

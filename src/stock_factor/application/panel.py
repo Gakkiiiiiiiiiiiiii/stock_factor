@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import re
 from datetime import date, datetime
 
 import numpy as np
 
 from stock_factor.domain.market import MarketDataSnapshot
+from stock_factor.ports.symbols import normalize_symbol
 
-_CODE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
 _BULLISH = "BULLISH"
 _BEARISH = "BEARISH"
 _VERIFIED = "EXTERNALLY_VERIFIED"
@@ -39,12 +38,22 @@ def _effective_date(signal: dict) -> date | None:
         return None
 
 
-def _codes(signal: dict) -> set[str]:
+def _symbols(signal: dict) -> set[str]:
     values = (signal.get("symbol"), signal.get("subject_key"), signal.get("subject"))
-    return {match.group(1) for value in values if value for match in _CODE.finditer(str(value))}
+    resolved: set[str] = set()
+    for value in values:
+        if not value:
+            continue
+        try:
+            resolved.add(normalize_symbol(str(value)))
+        except ValueError:
+            continue
+    return resolved
 
 
-def _content_feature_panel(symbols: list[str], dates: list[str], signals: list[dict], lookback_days: int = 5) -> dict[str, np.ndarray]:
+def _content_feature_panel(
+    symbols: list[str], dates: list[str], signals: list[dict], lookback_days: int = 5
+) -> dict[str, np.ndarray]:
     """Port of the baseline KnowledgeUnit V2 feature rules.
 
     Each unit becomes visible on the first trading day after its
@@ -55,7 +64,7 @@ def _content_feature_panel(symbols: list[str], dates: list[str], signals: list[d
 
     shape = (len(symbols), len(dates))
     panels = {name: np.zeros(shape) for name in _CONTENT_NAMES}
-    code_index = {match.group(1): index for index, symbol in enumerate(symbols) if (match := _CODE.search(symbol))}
+    code_index = {normalize_symbol(symbol): index for index, symbol in enumerate(symbols)}
     day_dates = [date.fromisoformat(str(value)[:10]) for value in dates]
     cells: dict[tuple[int, int], list[dict]] = {}
     for signal in signals:
@@ -64,7 +73,7 @@ def _content_feature_panel(symbols: list[str], dates: list[str], signals: list[d
         effective = _effective_date(signal)
         if effective is None:
             continue
-        rows = [code_index[code] for code in _codes(signal) if code in code_index]
+        rows = [code_index[symbol] for symbol in _symbols(signal) if symbol in code_index]
         for day_index, current_day in enumerate(day_dates):
             delta = (current_day - effective).days
             if delta <= 0 or delta > lookback_days:
@@ -80,7 +89,9 @@ def _content_feature_panel(symbols: list[str], dates: list[str], signals: list[d
             sentiment = str(signal.get("sentiment") or "").upper()
             kind = str(signal.get("knowledge_kind") or signal.get("kind") or "").upper()
             verified = str(signal.get("truth_status") or "").upper() == _VERIFIED
-            video_id = str(signal.get("source_video_id") or signal.get("knowledge_uid") or signal.get("signal_id") or "")
+            video_id = str(
+                signal.get("source_video_id") or signal.get("knowledge_uid") or signal.get("signal_id") or ""
+            )
             if sentiment in {_BULLISH, _BEARISH}:
                 video_sentiments.setdefault(video_id, set()).add(sentiment)
                 subject = str(signal.get("subject_key") or signal.get("subject") or "")
@@ -88,7 +99,9 @@ def _content_feature_panel(symbols: list[str], dates: list[str], signals: list[d
                     subject_video_sentiments.setdefault(subject, {}).setdefault(video_id, set()).add(sentiment)
             panels["video_bullish_claim_count"][row, day_index] += sentiment == _BULLISH
             panels["video_bearish_claim_count"][row, day_index] += sentiment == _BEARISH
-            panels["verified_catalyst_count"][row, day_index] += verified and sentiment == _BULLISH and kind in _CATALYST_KINDS
+            panels["verified_catalyst_count"][row, day_index] += (
+                verified and sentiment == _BULLISH and kind in _CATALYST_KINDS
+            )
             panels["verified_risk_count"][row, day_index] += verified and (kind in _RISK_KINDS or sentiment == _BEARISH)
 
         panels["event_heat"][row, day_index] = len(videos)

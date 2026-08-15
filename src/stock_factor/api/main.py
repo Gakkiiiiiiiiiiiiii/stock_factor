@@ -88,7 +88,9 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
     @app.post("/api/v1/factors/evaluate")
     def evaluate_factor(request: FactorEvaluateRequest) -> dict:
         try:
-            data = application.evaluate(request.factor_id, request.rpn, request.symbols, request.start, request.end, request.horizon)
+            data = application.evaluate(
+                request.factor_id, request.rpn, request.symbols, request.start, request.end, request.horizon
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"contract_version": "factor.v1", "data": data}
@@ -99,11 +101,19 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
 
     @app.post("/api/v1/paper/orders/generate")
     def generate_orders(request: PaperOrderRequest) -> dict:
-        return {"contract_version": "factor.v1", "data": application.generate_paper_orders(request.scores, request.as_of, request.data_snapshot_id, request.top_k)}
+        return {
+            "contract_version": "factor.v1",
+            "data": application.generate_paper_orders(
+                request.scores, request.as_of, request.data_snapshot_id, request.top_k
+            ),
+        }
 
     @app.post("/api/v1/paper/run")
     def run_paper(request: PaperRunRequest) -> dict:
-        return {"contract_version": "factor.v1", "data": application.run_paper(request.as_of, request.data_snapshot_id, request.market_prices)}
+        return {
+            "contract_version": "factor.v1",
+            "data": application.run_paper(request.as_of, request.data_snapshot_id, request.market_prices),
+        }
 
     @app.get("/api/v1/paper/state")
     def paper_state() -> dict:

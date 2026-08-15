@@ -32,7 +32,15 @@ def _json_safe(value):
 
 
 class FactorApplication:
-    def __init__(self, jobs: FactorJobRepository, factors: FactorRepository, mining: FactorMiningService, market: MarketDataProvider, content: ContentSignalProvider, paper: PaperTradingService) -> None:
+    def __init__(
+        self,
+        jobs: FactorJobRepository,
+        factors: FactorRepository,
+        mining: FactorMiningService,
+        market: MarketDataProvider,
+        content: ContentSignalProvider,
+        paper: PaperTradingService,
+    ) -> None:
         self._jobs, self._factors, self._mining = jobs, factors, mining
         self._market, self._content, self._paper = market, content, paper
 
@@ -77,7 +85,15 @@ class FactorApplication:
         signals = self._content.load_signals(symbols, resolved_start, resolved_end)
         return snapshot, build_feature_panel(snapshot, signals)
 
-    def evaluate(self, factor_id: str | None, rpn: list[str], symbols: list[str], start: str | None, end: str | None, horizon: int) -> dict:
+    def evaluate(
+        self,
+        factor_id: str | None,
+        rpn: list[str],
+        symbols: list[str],
+        start: str | None,
+        end: str | None,
+        horizon: int,
+    ) -> dict:
         definition = self._factors.get(factor_id) if factor_id else None
         formula = list(definition["rpn"] if definition else rpn)
         if not formula or not symbols:
@@ -87,14 +103,33 @@ class FactorApplication:
         if values is None:
             raise ValueError("invalid or non-computable factor formula")
         metrics = _json_safe(evaluate_factor(values, panel["close"], horizon=horizon))
-        return {"factor_id": factor_id, "rpn": formula, "metrics": metrics, "data_version": snapshot.data_version, "data_snapshot_id": snapshot.data_snapshot_id}
+        return {
+            "factor_id": factor_id,
+            "rpn": formula,
+            "metrics": metrics,
+            "data_version": snapshot.data_version,
+            "data_snapshot_id": snapshot.data_snapshot_id,
+        }
 
     def alpha_score(self, symbols: list[str], as_of: str | None) -> dict:
         snapshot, panel = self._panel(symbols, None, as_of)
         factors = self._factors.list_active(100)
         scores, count = compose_alpha_scores(panel, factors)
-        items = [] if scores is None else [{"symbol": symbol, "score": None if np.isnan(scores[index]) else round(float(scores[index]), 8)} for index, symbol in enumerate(snapshot.symbols)]
-        return {"as_of": snapshot.dates[-1] if snapshot.dates else as_of, "factor_count": count, "data_version": snapshot.data_version, "data_snapshot_id": snapshot.data_snapshot_id, "items": items}
+        items = (
+            []
+            if scores is None
+            else [
+                {"symbol": symbol, "score": None if np.isnan(scores[index]) else round(float(scores[index]), 8)}
+                for index, symbol in enumerate(snapshot.symbols)
+            ]
+        )
+        return {
+            "as_of": snapshot.dates[-1] if snapshot.dates else as_of,
+            "factor_count": count,
+            "data_version": snapshot.data_version,
+            "data_snapshot_id": snapshot.data_snapshot_id,
+            "items": items,
+        }
 
     def generate_paper_orders(self, scores: list[dict], as_of: str, snapshot_id: str, top_k: int) -> dict:
         return self._paper.generate_orders(scores, as_of, snapshot_id, top_k)

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
-from math import erfc, sqrt
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import numpy as np
 
 from stock_factor.application.panel import build_feature_panel
+from stock_factor.application.statistical_experiment import (
+    rank_ic_series,
+    validate_statistical_experiment,
+)
 from stock_factor.domain.factor import FactorDefinition
 from stock_factor.engine.diagnostics import (
     compute_capacity_proxy,
@@ -22,16 +25,15 @@ from stock_factor.engine.lookback import max_lookback_from_rpn
 from stock_factor.engine.promotion_gate import evaluate_promotion_gate
 from stock_factor.engine.purged_walkforward import run_purged_walkforward
 from stock_factor.engine.research_split import build_research_split
-from stock_factor.engine.statistical_validation import validate_factor_statistics
 from stock_factor.engine.vm import StackVM
 from stock_factor.engine.vocab import is_valid_token
-from stock_factor.research_config import get_research_config
 from stock_factor.ports.providers import (
     ContentSignalProvider,
     FactorRepository,
     MarketDataProvider,
     ModelClient,
 )
+from stock_factor.research_config import get_research_config
 
 SEEDS = [
     ("momentum_20", ["close", "close", "ts_delay_20", "div", "cs_rank"], "20-day price momentum"),
@@ -97,25 +99,6 @@ class FactorMiningService:
         return selected
 
     @staticmethod
-    def _statistics(metrics: dict, candidate_count: int) -> dict:
-        observations = int(metrics.get("valid_ic_days") or 0)
-        rank_ic = float(metrics.get("rank_ic") or 0.0)
-        z_score = abs(rank_ic) * sqrt(max(observations, 1))
-        p_value = erfc(z_score / sqrt(2))
-        # PBO requires multiple independent trial return series.  The current
-        # candidate's scalar evaluation cannot fabricate one, therefore a
-        # conservative one-row series makes the gate fail closed until the
-        # experiment runner supplies the full candidate return matrix.
-        returns_by_trial = np.asarray([[rank_ic] * max(observations, 1)], dtype=float)
-        return validate_factor_statistics(
-            [p_value],
-            sharpe=float(metrics.get("icir") or 0.0),
-            observations=observations,
-            trials=max(candidate_count, 1),
-            returns_by_trial=returns_by_trial,
-        )
-
-    @staticmethod
     def _diagnostics(values: np.ndarray, panel: dict) -> tuple[dict, dict, dict]:
         volume = np.asarray(panel.get("volume"), dtype=float)
         latest = values[:, -1] if values.ndim == 2 and values.shape[1] else np.asarray([])
@@ -134,7 +117,10 @@ class FactorMiningService:
         if not symbols:
             raise ValueError("symbols must not be empty")
         end = request.get("end") or datetime.now(UTC).date().isoformat()
-        start = request.get("start") or (datetime.fromisoformat(end) - timedelta(days=int(request.get("days") or 365) * 2)).date().isoformat()
+        start = (
+            request.get("start")
+            or (datetime.fromisoformat(end) - timedelta(days=int(request.get("days") or 365) * 2)).date().isoformat()
+        )
         progress("data", 10)
         snapshot = self._market.get_daily_bars(symbols, start, end, "qfq")
         signals = self._content.load_signals(symbols, start, end)
@@ -142,16 +128,18 @@ class FactorMiningService:
         config = get_research_config()
         budget = max(1, min(int(request.get("candidate_budget") or 50), 200))
         candidates = self._canonical_candidates(self._candidates(request), budget)
-        accepted = []
+        horizon = int(request.get("horizon") or config.evaluation.horizon_days)
+        evaluated: list[dict] = []
         for index, candidate in enumerate(candidates):
             rpn = candidate["rpn"]
             max_lookback_from_rpn(rpn)
             values = StackVM().execute(rpn, panel)
             if values is None:
                 continue
-            horizon = int(request.get("horizon") or config.evaluation.horizon_days)
             split = build_research_split(values.shape[1], config.data_split, horizon)
-            preliminary = evaluate_factor(values, panel["close"], horizon=horizon, eval_window=request.get("eval_window"))
+            preliminary = evaluate_factor(
+                values, panel["close"], horizon=horizon, eval_window=request.get("eval_window")
+            )
             if split is None:
                 walkforward = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
                 final_oos = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
@@ -171,7 +159,39 @@ class FactorMiningService:
                     horizon=horizon,
                 )
             diagnostics, exposure, capacity = self._diagnostics(values, panel)
-            statistics = self._statistics(preliminary, len(candidates))
+            evaluated.append(
+                {
+                    "candidate": candidate,
+                    "values": values,
+                    "preliminary": preliminary,
+                    "walkforward": walkforward,
+                    "final_oos": final_oos,
+                    "diagnostics": diagnostics,
+                    "exposure": exposure,
+                    "capacity": capacity,
+                    "split": split,
+                }
+            )
+            progress("evaluate", 20 + int((index + 1) * 55 / max(len(candidates), 1)))
+
+        cohort_statistics = validate_statistical_experiment(
+            {
+                item["candidate"]["candidate_hash"]: rank_ic_series(item["values"], panel["close"], horizon)
+                for item in evaluated
+            }
+        )
+        accepted = []
+        for index, item in enumerate(evaluated):
+            candidate = item["candidate"]
+            values = item["values"]
+            preliminary = item["preliminary"]
+            walkforward = item["walkforward"]
+            final_oos = item["final_oos"]
+            diagnostics = item["diagnostics"]
+            exposure = item["exposure"]
+            capacity = item["capacity"]
+            split = item["split"]
+            statistics = cohort_statistics[candidate["candidate_hash"]]
             promotion = evaluate_promotion_gate(
                 walkforward=walkforward,
                 statistics=statistics,
@@ -196,7 +216,21 @@ class FactorMiningService:
                 "data_version": snapshot.data_version,
                 "data_snapshot_id": snapshot.data_snapshot_id,
             }
-            definition = FactorDefinition(factor_id=uuid4().hex, name=candidate.get("name") or candidate["candidate_hash"][:12], rpn=rpn, hypothesis=candidate.get("hypothesis", ""), status=status, metrics=metrics, candidate_hash=candidate["candidate_hash"])
+            definition = FactorDefinition(
+                factor_id=uuid4().hex,
+                name=candidate.get("name") or candidate["candidate_hash"][:12],
+                rpn=rpn,
+                hypothesis=candidate.get("hypothesis", ""),
+                status=status,
+                metrics=metrics,
+                candidate_hash=candidate["candidate_hash"],
+            )
             accepted.append(self._factors.save(definition))
-            progress("evaluate", 20 + int((index + 1) * 70 / max(len(candidates), 1)))
-        return {"factor_count": len(accepted), "factors": accepted, "data_version": snapshot.data_version, "data_snapshot_id": snapshot.data_snapshot_id, "content_signal_count": len(signals)}
+            progress("promotion", 75 + int((index + 1) * 20 / max(len(evaluated), 1)))
+        return {
+            "factor_count": len(accepted),
+            "factors": accepted,
+            "data_version": snapshot.data_version,
+            "data_snapshot_id": snapshot.data_snapshot_id,
+            "content_signal_count": len(signals),
+        }

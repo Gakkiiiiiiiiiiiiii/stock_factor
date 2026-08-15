@@ -16,11 +16,16 @@ class PostgresFactorRepository:
 
     @staticmethod
     def _payload(row: FactorRow) -> dict:
-        return {name: getattr(row, name) for name in ("factor_id", "name", "rpn", "hypothesis", "status", "version", "metrics", "candidate_hash")}
+        return {
+            name: getattr(row, name)
+            for name in ("factor_id", "name", "rpn", "hypothesis", "status", "version", "metrics", "candidate_hash")
+        }
 
     def list_active(self, limit: int = 20) -> list[dict]:
         with self._sessions() as session:
-            rows = session.scalars(select(FactorRow).where(FactorRow.status == "ACTIVE").order_by(FactorRow.updated_at.desc()).limit(limit)).all()
+            rows = session.scalars(
+                select(FactorRow).where(FactorRow.status == "ACTIVE").order_by(FactorRow.updated_at.desc()).limit(limit)
+            ).all()
             return [self._payload(row) for row in rows]
 
     def get(self, factor_id: str) -> dict | None:
@@ -46,7 +51,22 @@ class PostgresFactorJobRepository:
 
     @staticmethod
     def _domain(row: FactorJobRow) -> FactorJob:
-        return FactorJob(**{name: getattr(row, name) for name in ("job_id", "status", "stage", "progress", "retry_count", "max_retries", "request", "result", "error")})
+        return FactorJob(
+            **{
+                name: getattr(row, name)
+                for name in (
+                    "job_id",
+                    "status",
+                    "stage",
+                    "progress",
+                    "retry_count",
+                    "max_retries",
+                    "request",
+                    "result",
+                    "error",
+                )
+            }
+        )
 
     def create(self, job: FactorJob) -> FactorJob:
         with self._sessions.begin() as session:
@@ -69,7 +89,19 @@ class PostgresFactorJobRepository:
     def claim_pending(self, worker_id: str, lease_seconds: int) -> FactorJob | None:
         now = datetime.now(UTC)
         with self._sessions.begin() as session:
-            row = session.scalar(select(FactorJobRow).where(FactorJobRow.retry_count < FactorJobRow.max_retries, or_(FactorJobRow.status == "PENDING", (FactorJobRow.status == "RUNNING") & (FactorJobRow.lease_expires_at < now))).order_by(FactorJobRow.created_at).limit(1).with_for_update(skip_locked=True))
+            row = session.scalar(
+                select(FactorJobRow)
+                .where(
+                    FactorJobRow.retry_count < FactorJobRow.max_retries,
+                    or_(
+                        FactorJobRow.status == "PENDING",
+                        (FactorJobRow.status == "RUNNING") & (FactorJobRow.lease_expires_at < now),
+                    ),
+                )
+                .order_by(FactorJobRow.created_at)
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
             if row is None:
                 return None
             row.status, row.lease_owner = "RUNNING", worker_id
@@ -111,7 +143,16 @@ class PostgresPaperRepository:
                 row = PaperStateRow(account_id=account_id)
                 session.add(row)
                 session.flush()
-            return {"account_id": row.account_id, "cash": row.cash, "positions": row.positions or {}, "frozen_orders": row.frozen_orders or [], "order_history": row.order_history or [], "fill_history": row.fill_history or [], "risk_events": row.risk_events or [], "data_snapshot_id": row.data_snapshot_id}
+            return {
+                "account_id": row.account_id,
+                "cash": row.cash,
+                "positions": row.positions or {},
+                "frozen_orders": row.frozen_orders or [],
+                "order_history": row.order_history or [],
+                "fill_history": row.fill_history or [],
+                "risk_events": row.risk_events or [],
+                "data_snapshot_id": row.data_snapshot_id,
+            }
 
     def freeze(self, orders: list[dict], snapshot_id: str, account_id: str = "default") -> dict:
         with self._sessions.begin() as session:
@@ -144,11 +185,22 @@ class PostgresPaperRepository:
             session.flush()
             return self.state(account_id)
 
-    def append_equity(self, as_of: str, equity: float, cash: float, snapshot_id: str, account_id: str = "default") -> None:
+    def append_equity(
+        self, as_of: str, equity: float, cash: float, snapshot_id: str, account_id: str = "default"
+    ) -> None:
         with self._sessions.begin() as session:
-            session.add(PaperEquityRow(account_id=account_id, as_of=as_of, equity=equity, cash=cash, data_snapshot_id=snapshot_id))
+            session.add(
+                PaperEquityRow(
+                    account_id=account_id, as_of=as_of, equity=equity, cash=cash, data_snapshot_id=snapshot_id
+                )
+            )
 
     def equity(self, account_id: str = "default") -> list[dict]:
         with self._sessions() as session:
-            rows = session.scalars(select(PaperEquityRow).where(PaperEquityRow.account_id == account_id).order_by(PaperEquityRow.id)).all()
-            return [{"as_of": row.as_of, "equity": row.equity, "cash": row.cash, "data_snapshot_id": row.data_snapshot_id} for row in rows]
+            rows = session.scalars(
+                select(PaperEquityRow).where(PaperEquityRow.account_id == account_id).order_by(PaperEquityRow.id)
+            ).all()
+            return [
+                {"as_of": row.as_of, "equity": row.equity, "cash": row.cash, "data_snapshot_id": row.data_snapshot_id}
+                for row in rows
+            ]

@@ -22,4 +22,6 @@ def build_application(database_url: str | None = None, market=None, content=None
     paper_repository = PostgresPaperRepository(database.session_factory)
     model_client = model or HttpModelClient()
     mining = FactorMiningService(market_provider, content_provider, factors, model_client)
-    return FactorApplication(jobs, factors, mining, market_provider, content_provider, PaperTradingService(paper_repository))
+    return FactorApplication(
+        jobs, factors, mining, market_provider, content_provider, PaperTradingService(paper_repository)
+    )

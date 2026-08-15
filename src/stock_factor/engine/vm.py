@@ -34,7 +34,11 @@ class StackVM:
                         return None
                     arguments = stack[-arity:]
                     del stack[-arity:]
-                    stack.append(np.nan_to_num(np.asarray(function(*arguments), dtype=float), nan=np.nan, posinf=np.nan, neginf=np.nan))
+                    stack.append(
+                        np.nan_to_num(
+                            np.asarray(function(*arguments), dtype=float), nan=np.nan, posinf=np.nan, neginf=np.nan
+                        )
+                    )
         except Exception as exc:
             LOGGER.debug("factor formula failed %s: %s", rpn, exc)
             return None

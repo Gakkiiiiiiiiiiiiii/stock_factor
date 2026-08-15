@@ -22,4 +22,3 @@ ACTIVATION_ALLOWED = {FactorLifecycleStatus.APPROVED.value, FactorLifecycleStatu
 
 def can_activate(status: str) -> bool:
     return status in ACTIVATION_ALLOWED
-

@@ -69,9 +69,29 @@ def run_purged_walkforward(
     windows = []
     for index, (start, stop) in enumerate(build_eval_windows(eval_start, end, n_windows, embargo)):
         metrics = evaluate_factor_range(factor_panel, closes, start, stop, horizon)
-        windows.append({"window_index": index, "history_range": (0, max(eval_start, start - embargo)), "embargo_range": (max(eval_start, start - embargo), start), "test_range": (start, stop), "metrics": metrics, "passed": bool(metrics.get("passed"))})
+        windows.append(
+            {
+                "window_index": index,
+                "history_range": (0, max(eval_start, start - embargo)),
+                "embargo_range": (max(eval_start, start - embargo), start),
+                "test_range": (start, stop),
+                "metrics": metrics,
+                "passed": bool(metrics.get("passed")),
+            }
+        )
     ranks = [float(item["metrics"].get("rank_ic", 0)) for item in windows]
     excess = [float(item["metrics"].get("topk_excess_annual_return", 0)) for item in windows]
     pass_ratio = sum(item["passed"] for item in windows) / len(windows) if windows else 0.0
     positive_ratio = sum(value > 0 for value in ranks) / len(ranks) if ranks else 0.0
-    return {"method": "purged_walkforward", "windows": windows, "mean_rank_ic": round(float(np.mean(ranks)), 6) if ranks else 0.0, "min_rank_ic": round(float(np.min(ranks)), 6) if ranks else 0.0, "window_pass_ratio": round(pass_ratio, 6), "positive_window_ratio": round(positive_ratio, 6), "oos_excess_return": round(float(np.mean(excess)), 6) if excess else 0.0, "passed": bool(windows and pass_ratio >= 2 / 3 and positive_ratio >= 2 / 3 and np.mean(excess) > 0 and min(ranks) > -0.05)}
+    return {
+        "method": "purged_walkforward",
+        "windows": windows,
+        "mean_rank_ic": round(float(np.mean(ranks)), 6) if ranks else 0.0,
+        "min_rank_ic": round(float(np.min(ranks)), 6) if ranks else 0.0,
+        "window_pass_ratio": round(pass_ratio, 6),
+        "positive_window_ratio": round(positive_ratio, 6),
+        "oos_excess_return": round(float(np.mean(excess)), 6) if excess else 0.0,
+        "passed": bool(
+            windows and pass_ratio >= 2 / 3 and positive_ratio >= 2 / 3 and np.mean(excess) > 0 and min(ranks) > -0.05
+        ),
+    }

@@ -26,8 +26,6 @@ class FixtureModel:
 
 def test_model_candidate_generation_is_injected_and_vocab_checked():
     service = FactorMiningService(FixtureMarket(), FixtureContent(), FixtureFactors(), FixtureModel())
-    result = service.run(
-        {"symbols": [f"6000{index:02d}" for index in range(20)], "use_model": True}
-    )
+    result = service.run({"symbols": [f"6000{index:02d}" for index in range(20)], "use_model": True})
     assert result["factor_count"] == 1
     assert result["factors"][0]["name"] == "model_reversal"
