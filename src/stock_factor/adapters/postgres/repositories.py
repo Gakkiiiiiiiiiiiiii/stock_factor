@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import sessionmaker
 
 from stock_factor.adapters.postgres.models import (
@@ -147,7 +147,7 @@ class PostgresFactorRepository:
                     mining_job_id=(factor.metrics or {}).get("mining_job_id"),
                     data_snapshot_id=(factor.metrics or {}).get("data_snapshot_id"),
                     passed=bool(promotion.get("passed")),
-                    failed_rules=list(promotion.get("failed_rules") or []),
+                    failed_rules=list(promotion.get("reject_reasons") or promotion.get("failed_rules") or []),
                     metrics_snapshot=promotion,
                 )
             )
@@ -363,6 +363,7 @@ class PostgresPaperRepository:
                 idempotency_key=key,
             )
             session.add(run)
+        ledger_events: list[tuple[str, float, str]] = []
         for fill in fills:
             if fill.get("status") != "FILLED":
                 continue
@@ -386,7 +387,7 @@ class PostgresPaperRepository:
                     gross_amount=abs(qty) * price,
                     commission=float(fill.get("commission") or 0.0),
                     stamp_duty=float(fill.get("stamp_duty") or 0.0),
-                    slippage=0.0,
+                    slippage=float(fill.get("execution_price") or price) - float(fill.get("reference_price") or price),
                     net_cash_change=net_cash,
                     executed_at=datetime.fromisoformat(str(fill["as_of"]) + "T00:00:00+00:00"),
                 )
@@ -405,16 +406,32 @@ class PostgresPaperRepository:
                 ("STAMP_DUTY", -float(fill.get("stamp_duty") or 0.0)),
             ):
                 if amount:
-                    session.add(
-                        PaperCashLedgerRow(
-                            entry_id=uuid4().hex,
-                            run_id=run.run_id,
-                            event_type=event_type,
-                            amount=amount,
-                            balance_after=cash,
-                            reference_id=fill_id,
-                        )
+                    ledger_events.append((event_type, amount, fill_id))
+        if ledger_events:
+            prior_sequence = session.scalar(
+                select(func.max(PaperCashLedgerRow.sequence))
+                .join(PaperRunRow, PaperCashLedgerRow.run_id == PaperRunRow.run_id)
+                .where(PaperRunRow.account_id == account_id)
+            ) or 0
+            # The projected state is updated only after all fills are known.
+            # Reconstruct the opening balance from the deterministic event
+            # deltas, then make every ledger row a sequential source of truth.
+            balance = cash - sum(item[1] for item in ledger_events)
+            for offset, (event_type, amount, fill_id) in enumerate(ledger_events, start=1):
+                before = balance
+                balance += amount
+                session.add(
+                    PaperCashLedgerRow(
+                        entry_id=uuid4().hex,
+                        run_id=run.run_id,
+                        event_type=event_type,
+                        sequence=prior_sequence + offset,
+                        amount=amount,
+                        balance_before=before,
+                        balance_after=balance,
+                        reference_id=fill_id,
                     )
+                )
         # The JSON state is a projection only.  Lots are independently
         # persisted so a replay can reproduce sellability and cost basis.
         active_symbols = set(positions)
@@ -444,6 +461,36 @@ class PostgresPaperRepository:
                 else:
                     for name, value in values.items():
                         setattr(lot, name, value)
+
+    def replay(self, account_id: str = "default") -> dict:
+        """Rebuild cash and signed quantities from the immutable execution ledger."""
+        with self._sessions() as session:
+            entries = session.scalars(
+                select(PaperCashLedgerRow)
+                .join(PaperRunRow, PaperCashLedgerRow.run_id == PaperRunRow.run_id)
+                .where(PaperRunRow.account_id == account_id)
+                .order_by(PaperCashLedgerRow.sequence, PaperCashLedgerRow.created_at, PaperCashLedgerRow.entry_id)
+            ).all()
+            fills = session.execute(
+                select(PaperFillRow, PaperOrderRow.symbol)
+                .join(PaperOrderRow, PaperFillRow.order_id == PaperOrderRow.order_id)
+                .join(PaperRunRow, PaperOrderRow.run_id == PaperRunRow.run_id)
+                .where(PaperRunRow.account_id == account_id)
+                .order_by(PaperFillRow.executed_at, PaperFillRow.fill_id)
+            ).all()
+            cash = entries[0].balance_before if entries else 1_000_000.0
+            for entry in entries:
+                cash += entry.amount
+            positions: dict[str, int] = {}
+            for fill, symbol in fills:
+                positions[symbol] = positions.get(symbol, 0) + fill.quantity
+            return {
+                "account_id": account_id,
+                "cash": round(cash, 8),
+                "positions": {symbol: quantity for symbol, quantity in positions.items() if quantity},
+                "ledger_entry_count": len(entries),
+                "fill_count": len(fills),
+            }
 
     def append_equity(
         self, as_of: str, equity: float, cash: float, snapshot_id: str, account_id: str = "default"

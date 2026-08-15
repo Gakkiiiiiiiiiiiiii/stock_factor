@@ -24,4 +24,9 @@ def test_paper_execution_persists_lots_fills_and_ledger_and_consumes_fifo(tmp_pa
         lots = session.scalars(select(PaperPositionLotRow)).all()
     assert len(fills) == 2
     assert {item.event_type for item in ledgers} >= {"BUY", "SELL", "COMMISSION"}
+    assert all(item.balance_after == item.balance_before + item.amount for item in ledgers)
+    assert [item.sequence for item in ledgers] == sorted(item.sequence for item in ledgers)
     assert lots and all(item.available_quantity == 0 for item in lots)
+    replay = application.paper_replay()
+    assert replay["cash"] == sold["cash"]
+    assert replay["positions"] == {}

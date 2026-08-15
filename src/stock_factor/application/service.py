@@ -142,3 +142,6 @@ class FactorApplication:
 
     def paper_equity(self) -> list[dict]:
         return self._paper.equity()
+
+    def paper_replay(self) -> dict:
+        return self._paper.replay()

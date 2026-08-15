@@ -59,22 +59,36 @@ class FactorMiningService:
         if supplied:
             return supplied
         if request.get("use_model") and self._model is not None:
-            prompt = (
-                "Generate JSON array of factor candidates. Each item must contain name, hypothesis and "
-                "an RPN token array using only the documented stock_factor vocabulary."
-            )
-            parsed = json.loads(self._model.complete(prompt, system="You are a quantitative factor researcher."))
-            candidates = parsed.get("candidates", []) if isinstance(parsed, dict) else parsed
-            valid = [
-                item
-                for item in candidates
-                if isinstance(item, dict)
-                and item.get("rpn")
-                and all(is_valid_token(str(token)) for token in item["rpn"])
-            ]
+            valid = self._model_candidates()
             if valid:
                 return valid
         return self._seeds.load()
+
+    def _model_candidates(self, feedback: dict | None = None, previous: list[dict] | None = None) -> list[dict]:
+        if self._model is None:
+            return []
+        prompt = (
+            "Generate JSON array of factor candidates. Each item must contain name, hypothesis and "
+            "an RPN token array using only the documented stock_factor vocabulary."
+        )
+        if feedback:
+            prompt += (
+                " Improve the previous round using this structured feedback; do not repeat a formula or a "
+                f"known failure. feedback={json.dumps(feedback, sort_keys=True)} "
+                f"previous={json.dumps(previous or [], sort_keys=True)[:6000]}"
+            )
+        try:
+            parsed = json.loads(self._model.complete(prompt, system="You are a quantitative factor researcher."))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+        candidates = parsed.get("candidates", []) if isinstance(parsed, dict) else parsed
+        return [
+            item
+            for item in candidates
+            if isinstance(item, dict)
+            and item.get("rpn")
+            and all(is_valid_token(str(token)) for token in item["rpn"])
+        ]
 
     @staticmethod
     def _feedback(evaluated: list[dict]) -> dict:
@@ -159,6 +173,30 @@ class FactorMiningService:
             "generation_feedback": feedback,
         }
 
+    @staticmethod
+    def _correlation_deduplicate(evaluated: list[dict], threshold: float = 0.995) -> tuple[list[dict], list[dict]]:
+        """Keep one representative from each near-identical VM output cluster."""
+        retained: list[dict] = []
+        rejected: list[dict] = []
+        def fitness(value: dict) -> float:
+            result = value["preliminary"].get("fitness")
+            return float(result) if result is not None else float("-inf")
+
+        for item in sorted(evaluated, key=fitness, reverse=True):
+            values = np.asarray(item["values"], dtype=float).reshape(-1)
+            duplicate_of = None
+            for representative in retained:
+                other = np.asarray(representative["values"], dtype=float).reshape(-1)
+                valid = np.isfinite(values) & np.isfinite(other)
+                if valid.sum() >= 10 and abs(float(np.corrcoef(values[valid], other[valid])[0, 1])) >= threshold:
+                    duplicate_of = representative["candidate"]["candidate_hash"]
+                    break
+            if duplicate_of:
+                rejected.append({"candidate_hash": item["candidate"]["candidate_hash"], "representative": duplicate_of})
+            else:
+                retained.append(item)
+        return retained, rejected
+
     def run(self, request: dict, progress=lambda stage, value: None) -> dict:
         symbols = request.get("symbols") or []
         if not symbols:
@@ -232,7 +270,19 @@ class FactorMiningService:
             )
             if generation_round == round_limit or len(evaluated) >= budget or not round_evaluated:
                 break
-            proposed = [self._mutate(item["candidate"], feedback, generation_round + 1) for item in round_evaluated]
+            previous = [
+                {
+                    "candidate_hash": item["candidate"]["candidate_hash"],
+                    "rpn": item["candidate"]["rpn"],
+                    "fitness": item["preliminary"].get("fitness"),
+                    "passed": item["preliminary"].get("passed"),
+                }
+                for item in round_evaluated
+            ]
+            model_proposed = self._model_candidates(feedback, previous) if request.get("use_model") else []
+            proposed = model_proposed or [
+                self._mutate(item["candidate"], feedback, generation_round + 1) for item in round_evaluated
+            ]
             pending = self._canonical_candidates([item for item in proposed if item], budget - len(evaluated))[
                 :candidates_per_round
             ]
@@ -241,6 +291,7 @@ class FactorMiningService:
             if not pending:
                 break
 
+        evaluated, correlation_duplicates = self._correlation_deduplicate(evaluated)
         cohort_statistics = validate_statistical_experiment(
             {
                 item["candidate"]["candidate_hash"]: rank_ic_series(item["values"], panel["close"], horizon)
@@ -319,4 +370,5 @@ class FactorMiningService:
             "data_snapshot_id": snapshot.data_snapshot_id,
             "content_signal_count": len(signals),
             "search_rounds": search_rounds,
+            "correlation_duplicates": correlation_duplicates,
         }

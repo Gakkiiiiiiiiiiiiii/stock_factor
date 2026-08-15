@@ -29,3 +29,7 @@ class Database:
             for name, definition in additions.items():
                 if name not in columns:
                     connection.execute(text(f"ALTER TABLE paper_state ADD COLUMN {name} {definition}"))
+            ledger_columns = {column["name"] for column in inspect(connection).get_columns("paper_cash_ledger")}
+            for name, definition in {"sequence": "INTEGER NOT NULL DEFAULT 1", "balance_before": "FLOAT NOT NULL DEFAULT 0"}.items():
+                if name not in ledger_columns:
+                    connection.execute(text(f"ALTER TABLE paper_cash_ledger ADD COLUMN {name} {definition}"))

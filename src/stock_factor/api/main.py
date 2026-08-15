@@ -123,6 +123,10 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
     def paper_equity() -> dict:
         return {"contract_version": "factor.v1", "items": application.paper_equity()}
 
+    @app.get("/api/v1/paper/replay")
+    def paper_replay() -> dict:
+        return {"contract_version": "factor.v1", "data": application.paper_replay()}
+
     return app
 
 

@@ -26,6 +26,7 @@ class PaperRepository(Protocol):
         account_id: str = "default",
     ) -> dict: ...
     def equity(self, account_id: str = "default") -> list[dict]: ...
+    def replay(self, account_id: str = "default") -> dict: ...
 
 
 class PaperTradingService:
@@ -88,6 +89,9 @@ class PaperTradingService:
             for item in ranked
         ]
         return self._repository.freeze([*exits, *entries], snapshot_id)
+
+    def replay(self) -> dict:
+        return self._repository.replay()
 
     def run(self, as_of: str, snapshot_id: str, market_prices: dict[str, dict] | None = None) -> dict:
         state = self._repository.state()
@@ -215,6 +219,8 @@ class PaperTradingService:
                     "filled_quantity": quantity,
                     "remaining_quantity": remaining_quantity,
                     "execution_price": round(execution_price, 8),
+                    "reference_price": round(raw_price, 8),
+                    "slippage_bps": float(order.get("slippage_bps") or 0.0),
                     "fees": round(costs, 8),
                     "commission": round(commission, 8),
                     "stamp_duty": round(stamp_duty, 8),
