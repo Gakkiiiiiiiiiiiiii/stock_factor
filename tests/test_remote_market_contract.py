@@ -37,8 +37,8 @@ def test_feature_panel_maps_content_v2_fields_at_available_time():
         "v1", "s1", "fixture",
     )
     signals = [
-        {"symbol": "600000", "subject_key": "600000", "as_of_time": "2026-08-10T09:00:00+00:00", "knowledge_kind": "CAUSAL_THESIS", "sentiment": "BULLISH", "truth_status": "EXTERNALLY_VERIFIED", "source_video_id": "v1"},
-        {"symbol": "600000", "subject_key": "600000", "as_of_time": "2026-08-10T09:00:00+00:00", "knowledge_kind": "RISK_CONDITION", "sentiment": "BEARISH", "truth_status": "EXTERNALLY_VERIFIED", "source_video_id": "v2"},
+        {"symbol": "600000", "subject_key": "600000", "available_from": "2026-08-10T09:00:00+00:00", "knowledge_kind": "CAUSAL_THESIS", "sentiment": "BULLISH", "truth_status": "EXTERNALLY_VERIFIED", "source_video_id": "v1"},
+        {"symbol": "600000", "subject_key": "600000", "available_from": "2026-08-10T09:00:00+00:00", "knowledge_kind": "RISK_CONDITION", "sentiment": "BEARISH", "truth_status": "EXTERNALLY_VERIFIED", "source_video_id": "v2"},
     ]
     panel = build_feature_panel(snapshot, signals)
     assert panel["event_heat"].tolist() == [[0.0, 2.0]]

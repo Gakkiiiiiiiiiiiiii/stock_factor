@@ -42,6 +42,7 @@ class PaperOrderRequest(BaseModel):
 class PaperRunRequest(BaseModel):
     as_of: str
     data_snapshot_id: str
+    market_prices: dict[str, dict] = Field(default_factory=dict)
 
 
 def create_app(service: FactorApplication | None = None) -> FastAPI:
@@ -102,7 +103,7 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
 
     @app.post("/api/v1/paper/run")
     def run_paper(request: PaperRunRequest) -> dict:
-        return {"contract_version": "factor.v1", "data": application.run_paper(request.as_of, request.data_snapshot_id)}
+        return {"contract_version": "factor.v1", "data": application.run_paper(request.as_of, request.data_snapshot_id, request.market_prices)}
 
     @app.get("/api/v1/paper/state")
     def paper_state() -> dict:

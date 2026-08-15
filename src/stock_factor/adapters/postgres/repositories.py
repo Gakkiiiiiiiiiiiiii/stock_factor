@@ -111,14 +111,38 @@ class PostgresPaperRepository:
                 row = PaperStateRow(account_id=account_id)
                 session.add(row)
                 session.flush()
-            return {"account_id": row.account_id, "cash": row.cash, "positions": row.positions, "frozen_orders": row.frozen_orders, "data_snapshot_id": row.data_snapshot_id}
+            return {"account_id": row.account_id, "cash": row.cash, "positions": row.positions or {}, "frozen_orders": row.frozen_orders or [], "order_history": row.order_history or [], "fill_history": row.fill_history or [], "risk_events": row.risk_events or [], "data_snapshot_id": row.data_snapshot_id}
 
     def freeze(self, orders: list[dict], snapshot_id: str, account_id: str = "default") -> dict:
         with self._sessions.begin() as session:
             row = session.get(PaperStateRow, account_id) or PaperStateRow(account_id=account_id)
             session.add(row)
             row.frozen_orders, row.data_snapshot_id = orders, snapshot_id
+            row.order_history = [*(row.order_history or []), *orders]
             return {"account_id": account_id, "orders": orders, "data_snapshot_id": snapshot_id}
+
+    def update_state(
+        self,
+        *,
+        cash: float,
+        positions: dict[str, Any],
+        frozen_orders: list[dict],
+        fills: list[dict],
+        risk_events: list[dict],
+        snapshot_id: str,
+        account_id: str = "default",
+    ) -> dict:
+        with self._sessions.begin() as session:
+            row = session.get(PaperStateRow, account_id) or PaperStateRow(account_id=account_id)
+            session.add(row)
+            row.cash = cash
+            row.positions = positions
+            row.frozen_orders = frozen_orders
+            row.fill_history = [*(row.fill_history or []), *fills]
+            row.risk_events = [*(row.risk_events or []), *risk_events]
+            row.data_snapshot_id = snapshot_id
+            session.flush()
+            return self.state(account_id)
 
     def append_equity(self, as_of: str, equity: float, cash: float, snapshot_id: str, account_id: str = "default") -> None:
         with self._sessions.begin() as session:

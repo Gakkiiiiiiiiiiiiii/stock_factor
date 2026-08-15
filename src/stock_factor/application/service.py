@@ -99,8 +99,8 @@ class FactorApplication:
     def generate_paper_orders(self, scores: list[dict], as_of: str, snapshot_id: str, top_k: int) -> dict:
         return self._paper.generate_orders(scores, as_of, snapshot_id, top_k)
 
-    def run_paper(self, as_of: str, snapshot_id: str) -> dict:
-        return self._paper.run(as_of, snapshot_id)
+    def run_paper(self, as_of: str, snapshot_id: str, market_prices: dict[str, dict] | None = None) -> dict:
+        return self._paper.run(as_of, snapshot_id, market_prices)
 
     def paper_state(self) -> dict:
         return self._paper.state()

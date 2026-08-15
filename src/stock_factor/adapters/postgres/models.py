@@ -51,6 +51,9 @@ class PaperStateRow(Base):
     cash: Mapped[float] = mapped_column(Float, default=1_000_000)
     positions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     frozen_orders: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    order_history: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    fill_history: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    risk_events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

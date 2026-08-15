@@ -27,7 +27,10 @@ _CONTENT_NAMES = (
 
 
 def _effective_date(signal: dict) -> date | None:
-    raw = signal.get("as_of_time") or signal.get("as_of") or signal.get("available_from")
+    # A content claim can only enter a factor panel after it was available to
+    # the trading system.  ``as_of`` is an observation timestamp, not a
+    # visibility permission, so it must never be used as a fallback here.
+    raw = signal.get("available_from")
     if not raw:
         return None
     try:
@@ -44,7 +47,8 @@ def _codes(signal: dict) -> set[str]:
 def _content_feature_panel(symbols: list[str], dates: list[str], signals: list[dict], lookback_days: int = 5) -> dict[str, np.ndarray]:
     """Port of the baseline KnowledgeUnit V2 feature rules.
 
-    Each unit becomes visible on the first trading day after its ``as_of_time``
+    Each unit becomes visible on the first trading day after its
+    ``available_from`` timestamp
     and remains in a bounded lookback window. This preserves the baseline's
     anti-lookahead contract while keeping the Factor service HTTP-only.
     """
