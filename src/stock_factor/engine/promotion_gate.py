@@ -29,6 +29,7 @@ def evaluate_promotion_gate(
     diagnostics: dict | None = None,
     exposure: dict | None = None,
     capacity: dict | None = None,
+    recent_alpha: dict | None = None,
     min_window_pass_ratio: float = 0.60,
     min_capacity_proxy: float = 1.0,
     max_abs_liquidity_exposure: float = 0.80,
@@ -39,7 +40,12 @@ def evaluate_promotion_gate(
     """Deterministic promotion gate with explicit diagnostic provenance."""
     walkforward, statistics = walkforward or {}, statistics or {}
     final_oos, oos_audit = final_oos or {}, oos_audit or {}
-    diagnostics, exposure, capacity = diagnostics or {}, exposure or {}, capacity or {}
+    diagnostics, exposure, capacity, recent_alpha = (
+        diagnostics or {},
+        exposure or {},
+        capacity or {},
+        recent_alpha or {},
+    )
     reasons: list[str] = []
     if not walkforward.get("passed"):
         reasons.append("WALKFORWARD_FAILED")
@@ -70,6 +76,8 @@ def evaluate_promotion_gate(
         reasons.append("CAPACITY_MISSING")
     elif float(capacity.get("daily_notional_capacity_proxy", 0.0)) < min_capacity_proxy:
         reasons.append("CAPACITY_FAILED")
+    if not recent_alpha or not recent_alpha.get("passed"):
+        reasons.append("RECENT_ALPHA_FAILED")
     return PromotionGateResult(
         passed=not reasons,
         metrics={
@@ -80,6 +88,7 @@ def evaluate_promotion_gate(
             "diagnostics": diagnostics,
             "exposure": exposure,
             "capacity": capacity,
+            "recent_alpha": recent_alpha,
             "promotion_gate_version": gate_version,
             "statistical_validation_version": statistical_validation_version,
             "data_snapshot_id": data_snapshot_id,

@@ -8,6 +8,7 @@ from uuid import uuid4
 import numpy as np
 
 from stock_factor.application.panel import build_feature_panel
+from stock_factor.application.seed_library import Alpha191SeedLibrary
 from stock_factor.application.statistical_experiment import (
     rank_ic_series,
     validate_statistical_experiment,
@@ -36,13 +37,6 @@ from stock_factor.ports.providers import (
 )
 from stock_factor.research_config import get_research_config
 
-SEEDS = [
-    ("momentum_20", ["close", "close", "ts_delay_20", "div", "cs_rank"], "20-day price momentum"),
-    ("volume_price_corr", ["close", "volume", "ts_corr_10", "neg", "cs_rank"], "price-volume divergence"),
-    ("short_reversal", ["ret", "ts_mean_5", "neg", "cs_rank"], "short-term reversal"),
-    ("content_sentiment", ["theme_sentiment", "ts_sum_5", "cs_rank"], "verified content sentiment"),
-]
-
 
 class ResearchIntegrityError(ValueError):
     """Raised before persisting a candidate whose identity no longer matches its formula."""
@@ -55,8 +49,10 @@ class FactorMiningService:
         content: ContentSignalProvider,
         factors: FactorRepository,
         model: ModelClient | None = None,
+        seeds: Alpha191SeedLibrary | None = None,
     ) -> None:
         self._market, self._content, self._factors, self._model = market, content, factors, model
+        self._seeds = seeds or Alpha191SeedLibrary()
 
     def _candidates(self, request: dict) -> list[dict]:
         supplied = list(request.get("candidates") or [])
@@ -78,7 +74,30 @@ class FactorMiningService:
             ]
             if valid:
                 return valid
-        return [{"name": name, "rpn": rpn, "hypothesis": hypothesis} for name, rpn, hypothesis in SEEDS]
+        return self._seeds.load()
+
+    @staticmethod
+    def _feedback(evaluated: list[dict]) -> dict:
+        if not evaluated:
+            return {"reason": "EMPTY_ROUND", "quality": 0.0}
+        quality = max(float(item["preliminary"].get("fitness") or 0.0) for item in evaluated)
+        duplicates = len({item["candidate"]["candidate_hash"] for item in evaluated}) != len(evaluated)
+        return {"reason": "LOW_FITNESS" if quality <= 0 else "IMPROVING", "quality": quality, "duplicates": duplicates}
+
+    @staticmethod
+    def _recent_alpha(values: np.ndarray, close: np.ndarray, horizon: int) -> dict:
+        start = max(0, values.shape[1] - max(20, horizon * 4))
+        metrics = evaluate_factor_range(values, close, start, values.shape[1] - horizon, horizon=horizon)
+        return {
+            "recent_rank_ic": metrics.get("rank_ic"),
+            "recent_icir": metrics.get("icir"),
+            "recent_topk_excess": metrics.get("topk_excess_annual_return"),
+            "recent_hit_rate": metrics.get("positive_window_ratio"),
+            "recent_coverage": metrics.get("coverage"),
+            "recent_decay": compute_ic_decay(values[:, start:], close[:, start:], max_horizon=min(5, horizon)),
+            "recent_turnover": compute_turnover(values[:, start:], top_k=max(5, int(values.shape[0] * 0.01))),
+            "passed": bool(metrics.get("passed")) and float(metrics.get("rank_ic") or 0.0) > 0,
+        }
 
     @staticmethod
     def _canonical_candidates(candidates: list[dict], budget: int) -> list[dict]:
@@ -164,6 +183,7 @@ class FactorMiningService:
                     horizon=horizon,
                 )
             diagnostics, exposure, capacity = self._diagnostics(values, panel)
+            recent_alpha = self._recent_alpha(values, panel["close"], horizon)
             evaluated.append(
                 {
                     "candidate": candidate,
@@ -174,6 +194,7 @@ class FactorMiningService:
                     "diagnostics": diagnostics,
                     "exposure": exposure,
                     "capacity": capacity,
+                    "recent_alpha": recent_alpha,
                     "split": split,
                 }
             )
@@ -198,6 +219,7 @@ class FactorMiningService:
             diagnostics = item["diagnostics"]
             exposure = item["exposure"]
             capacity = item["capacity"]
+            recent_alpha = item["recent_alpha"]
             split = item["split"]
             statistics = cohort_statistics[candidate["candidate_hash"]]
             oos_audit = audit_final_oos(
@@ -213,6 +235,7 @@ class FactorMiningService:
                 diagnostics=diagnostics,
                 exposure=exposure,
                 capacity=capacity,
+                recent_alpha=recent_alpha,
                 data_snapshot_id=snapshot.data_snapshot_id,
             ).model_dump()
             # Mining never activates a factor.  A passing research gate only
@@ -227,6 +250,7 @@ class FactorMiningService:
                 "diagnostics": diagnostics,
                 "exposure": exposure,
                 "capacity": capacity,
+                "recent_alpha": recent_alpha,
                 "promotion_gate": promotion,
                 "research_split": split.diagnostics(horizon, values.shape[1]) if split else None,
                 "data_version": snapshot.data_version,

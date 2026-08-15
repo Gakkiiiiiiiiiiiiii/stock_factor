@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import date
 from math import floor
 from typing import Protocol
+
+from stock_factor.ports.trading_calendar import TradingCalendar, WeekdayTradingCalendar
 
 
 class PaperRepository(Protocol):
@@ -27,8 +30,22 @@ class PaperRepository(Protocol):
 class PaperTradingService:
     """T-1 order planning plus deterministic, cost-aware paper execution."""
 
-    def __init__(self, repository: PaperRepository) -> None:
+    def __init__(self, repository: PaperRepository, trading_calendar: TradingCalendar | None = None) -> None:
         self._repository = repository
+        self._calendar = trading_calendar or WeekdayTradingCalendar()
+
+    @staticmethod
+    def _exchange(symbol: str) -> str:
+        return (
+            "HK"
+            if symbol.endswith(".HK")
+            else "US"
+            if symbol.rsplit(".", 1)[-1].isalpha() and not symbol.endswith((".SH", ".SZ"))
+            else "CN"
+        )
+
+    def _execution_day(self, signal_day: str, symbol: str) -> str:
+        return self._calendar.next_trading_day(self._exchange(symbol), date.fromisoformat(signal_day[:10])).isoformat()
 
     def generate_orders(self, scores: list[dict], as_of: str, snapshot_id: str, top_k: int = 10) -> dict:
         ranked = sorted(scores, key=lambda item: float(item.get("score", 0)), reverse=True)[:top_k]
@@ -43,7 +60,7 @@ class PaperTradingService:
                 "side": "SELL",
                 "target_weight": 0.0,
                 "signal_as_of": as_of,
-                "execute_on": None,
+                "execute_on": self._execution_day(as_of, symbol),
                 "status": "FROZEN",
                 "order_type": "MARKET_OPEN",
                 "lot_size": 100,
@@ -65,7 +82,7 @@ class PaperTradingService:
                 "side": "BUY",
                 "target_weight": round(1 / max(len(ranked), 1), 8),
                 "signal_as_of": as_of,
-                "execute_on": item.get("next_trading_day"),
+                "execute_on": self._execution_day(as_of, str(item["symbol"])),
                 "status": "FROZEN",
                 "order_type": "MARKET_OPEN",
                 "lot_size": int(item.get("lot_size") or 100),
@@ -171,12 +188,15 @@ class PaperTradingService:
                 avg_cost = float(existing.get("avg_cost") or execution_price)
                 if quantity > 0:
                     avg_cost = (avg_cost * current_qty + execution_price * quantity + costs) / new_qty
+                realized = float(existing.get("realized_pnl") or 0.0)
+                if quantity < 0:
+                    consumed_cost = self._consume_lots(lots, abs(quantity))
+                    realized += execution_price * abs(quantity) - consumed_cost - costs
                 positions[order["symbol"]] = {
                     "quantity": new_qty,
                     "avg_cost": avg_cost,
                     "last_price": raw_price,
-                    "realized_pnl": float(existing.get("realized_pnl") or 0.0)
-                    + ((execution_price - avg_cost) * abs(quantity) - costs if quantity < 0 else 0.0),
+                    "realized_pnl": realized,
                     "lots": (
                         [
                             *list(existing.get("lots") or []),
@@ -185,10 +205,11 @@ class PaperTradingService:
                                 "quantity": quantity,
                                 "available_quantity": 0,
                                 "cost_price": execution_price,
+                                "remaining_cost": execution_price * quantity + costs,
                             },
                         ]
                         if quantity > 0
-                        else list(existing.get("lots") or [])
+                        else [lot for lot in lots if int(lot.get("quantity") or 0) > 0]
                     ),
                 }
             else:
@@ -244,3 +265,24 @@ class PaperTradingService:
 
     def equity(self) -> list[dict]:
         return self._repository.equity()
+
+    @staticmethod
+    def _consume_lots(lots: list[dict], quantity: int) -> float:
+        """Consume FIFO lots exactly once and return their remaining cost basis."""
+        remaining, consumed_cost = quantity, 0.0
+        for lot in sorted(lots, key=lambda value: str(value.get("buy_date") or "")):
+            if remaining <= 0:
+                break
+            available = int(lot.get("available_quantity", lot.get("quantity", 0)) or 0)
+            used = min(remaining, available)
+            if not used:
+                continue
+            total_quantity = max(int(lot.get("quantity") or 0), 1)
+            lot_cost = float(lot.get("remaining_cost") or float(lot.get("cost_price") or 0.0) * total_quantity)
+            proportional_cost = lot_cost * used / total_quantity
+            consumed_cost += proportional_cost
+            lot["quantity"] = total_quantity - used
+            lot["available_quantity"] = max(available - used, 0)
+            lot["remaining_cost"] = max(lot_cost - proportional_cost, 0.0)
+            remaining -= used
+        return consumed_cost

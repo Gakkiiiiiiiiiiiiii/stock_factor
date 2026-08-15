@@ -1,0 +1,16 @@
+# Alpha191-style, DSL-safe seeds.  These are intentionally maintained as
+# data: mining can use them for few-shot prompting, mutation baselines and
+# duplicate detection without hard-coding a small accidental sample in Python.
+seeds:
+  - {name: reversal_3d, hypothesis: "short reversal", rpn: [close, close, ts_delay_3, div, neg, cs_rank]}
+  - {name: reversal_10d, hypothesis: "medium reversal", rpn: [ret, ts_sum_10, neg, cs_rank]}
+  - {name: momentum_20d, hypothesis: "price momentum", rpn: [close, close, ts_delay_20, div, cs_rank]}
+  - {name: volume_price_corr_10d, hypothesis: "price volume divergence", rpn: [close, volume, ts_corr_10, neg, cs_rank]}
+  - {name: amount_surge_20d, hypothesis: "crowded amount surge", rpn: [amount, amount, ts_mean_20, div, neg, cs_rank]}
+  - {name: turnover_surge_5_20, hypothesis: "turnover crowding", rpn: [turnover, ts_mean_5, turnover, ts_mean_20, div, neg, cs_rank]}
+  - {name: volatility_ratio_5_20, hypothesis: "volatility expansion", rpn: [ret, ts_std_5, ret, ts_std_20, div, neg, cs_rank]}
+  - {name: vwap_deviation, hypothesis: "vwap reversal", rpn: [close, vwap, div, neg, cs_rank]}
+  - {name: intraday_position, hypothesis: "intraday strength", rpn: [close, low, sub, high, low, sub, div, cs_rank]}
+  - {name: ma_momentum_5_20, hypothesis: "moving average momentum", rpn: [close, ts_mean_5, close, ts_mean_20, div, cs_rank]}
+  - {name: low_volatility, hypothesis: "low volatility", rpn: [ret, ts_std_20, neg, cs_rank]}
+  - {name: content_sentiment, hypothesis: "verified content sentiment", rpn: [theme_sentiment, ts_sum_5, cs_rank]}

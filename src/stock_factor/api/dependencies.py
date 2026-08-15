@@ -10,6 +10,7 @@ from stock_factor.adapters.postgres.repositories import (
 from stock_factor.application.mining import FactorMiningService
 from stock_factor.application.paper import PaperTradingService
 from stock_factor.application.service import FactorApplication
+from stock_factor.ports.trading_calendar import ExchangeTradingCalendar
 
 
 def build_application(database_url: str | None = None, market=None, content=None, model=None) -> FactorApplication:
@@ -23,5 +24,13 @@ def build_application(database_url: str | None = None, market=None, content=None
     model_client = model or HttpModelClient()
     mining = FactorMiningService(market_provider, content_provider, factors, model_client)
     return FactorApplication(
-        jobs, factors, mining, market_provider, content_provider, PaperTradingService(paper_repository)
+        jobs,
+        factors,
+        mining,
+        market_provider,
+        content_provider,
+        PaperTradingService(
+            paper_repository,
+            ExchangeTradingCalendar(allow_weekday_fallback=bool(database_url and database_url.startswith("sqlite"))),
+        ),
     )

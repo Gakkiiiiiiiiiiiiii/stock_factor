@@ -7,6 +7,7 @@ dependencies = [
   "fastapi>=0.111",
   "filelock>=3.15",
   "httpx>=0.27",
+  "exchange-calendars>=4.5",
   "numpy>=1.26",
   "pydantic>=2.7",
   "pyyaml>=6.0",
