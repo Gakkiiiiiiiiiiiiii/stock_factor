@@ -45,3 +45,17 @@ def test_candidate_identity_keeps_each_rpn_and_hash_together():
     ]
     for factor in result["factors"]:
         assert factor["candidate_hash"] == hashlib.sha256(" ".join(factor["rpn"]).encode()).hexdigest()
+
+
+def test_multi_round_mining_feeds_evaluation_feedback_into_mutation():
+    service = FactorMiningService(FixtureMarket(), FixtureContent(), FixtureFactors())
+    result = service.run(
+        {
+            "symbols": [f"6000{index:02d}" for index in range(20)],
+            "rounds": 2,
+            "candidates_per_round": 1,
+            "candidates": [{"name": "base", "hypothesis": "base", "rpn": ["ret", "ts_mean_5", "neg", "cs_rank"]}],
+        }
+    )
+    assert [item["round"] for item in result["search_rounds"]] == [1, 2]
+    assert {item["metrics"]["generation_round"] for item in result["factors"]} == {1, 2}

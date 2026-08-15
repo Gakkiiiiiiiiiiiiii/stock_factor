@@ -20,3 +20,14 @@ def normalize_symbol(value: str) -> str:
     if re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,15}", raw):
         return f"US.{raw}"
     raise ValueError(f"unsupported symbol format: {value!r}")
+
+
+def symbol_exchange(value: str) -> str:
+    """Return the exchange family from any accepted or canonical symbol."""
+    return normalize_symbol(value).split(".", 1)[0]
+
+
+def symbol_local_code(value: str) -> str:
+    """Return the market-local ticker without reimplementing parser rules."""
+    canonical = normalize_symbol(value)
+    return canonical.rsplit(".", 1)[-1]

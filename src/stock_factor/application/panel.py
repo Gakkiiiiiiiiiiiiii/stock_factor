@@ -19,6 +19,7 @@ _CONTENT_NAMES = (
     "video_bearish_claim_count",
     "verified_catalyst_count",
     "verified_risk_count",
+    "content_attention_score",
     "author_attention_score",
     "cross_video_consensus",
     "cross_video_disagreement",
@@ -90,6 +91,9 @@ def _content_feature_panel(
         videos = {signal.get("source_video_id") for signal in cell_signals if signal.get("source_video_id")}
         video_sentiments: dict[str, set[str]] = {}
         subject_video_sentiments: dict[str, dict[str, set[str]]] = {}
+        attentions: list[float] = []
+        consensuses: list[float] = []
+        disagreements: list[float] = []
         for signal in cell_signals:
             sentiment = str(signal.get("sentiment") or "").upper()
             kind = str(signal.get("knowledge_kind") or signal.get("kind") or "").upper()
@@ -102,6 +106,12 @@ def _content_feature_panel(
                 subject = str(signal.get("subject_key") or signal.get("subject") or "")
                 if subject:
                     subject_video_sentiments.setdefault(subject, {}).setdefault(video_id, set()).add(sentiment)
+            if signal.get("content_attention_score") is not None:
+                attentions.append(float(signal["content_attention_score"]))
+            if signal.get("cross_video_consensus") is not None:
+                consensuses.append(float(signal["cross_video_consensus"]))
+            if signal.get("cross_video_disagreement") is not None:
+                disagreements.append(float(signal["cross_video_disagreement"]))
             panels["video_bullish_claim_count"][row, day_index] += sentiment == _BULLISH
             panels["video_bearish_claim_count"][row, day_index] += sentiment == _BEARISH
             panels["verified_catalyst_count"][row, day_index] += (
@@ -114,17 +124,28 @@ def _content_feature_panel(
             1 if directions == {_BULLISH} else -1 if directions == {_BEARISH} else 0
             for directions in video_sentiments.values()
         )
-        panels["author_attention_score"][row, day_index] = len(cell_signals) / max(len(videos), 1)
-        for per_video in subject_video_sentiments.values():
-            if len(per_video) < 2:
-                continue
-            directions = set().union(*per_video.values())
-            if directions == {_BULLISH}:
-                panels["cross_video_consensus"][row, day_index] += 1
-            elif directions == {_BEARISH}:
-                panels["cross_video_consensus"][row, day_index] -= 1
-            else:
-                panels["cross_video_disagreement"][row, day_index] += 1
+        # Content owns attention and corroboration semantics.  The legacy
+        # author_attention token stays as a compatibility alias for formulas.
+        # Older stored signals did not expose the canonical semantic fields;
+        # retain their historical calculation solely as a read-compatibility
+        # fallback. New Content v2 signals always take the branch above.
+        attention = float(np.mean(attentions)) if attentions else len(cell_signals) / max(len(videos), 1)
+        panels["content_attention_score"][row, day_index] = attention
+        panels["author_attention_score"][row, day_index] = attention
+        if consensuses or disagreements:
+            panels["cross_video_consensus"][row, day_index] = float(np.mean(consensuses)) if consensuses else 0.0
+            panels["cross_video_disagreement"][row, day_index] = float(np.mean(disagreements)) if disagreements else 0.0
+        else:
+            for per_video in subject_video_sentiments.values():
+                if len(per_video) < 2:
+                    continue
+                directions = set().union(*per_video.values())
+                if directions == {_BULLISH}:
+                    panels["cross_video_consensus"][row, day_index] += 1
+                elif directions == {_BEARISH}:
+                    panels["cross_video_consensus"][row, day_index] -= 1
+                else:
+                    panels["cross_video_disagreement"][row, day_index] += 1
     return panels
 
 

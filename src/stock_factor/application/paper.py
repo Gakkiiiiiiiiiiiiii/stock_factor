@@ -4,6 +4,7 @@ from datetime import date
 from math import floor
 from typing import Protocol
 
+from stock_factor.ports.symbols import symbol_exchange
 from stock_factor.ports.trading_calendar import TradingCalendar, WeekdayTradingCalendar
 
 
@@ -34,18 +35,8 @@ class PaperTradingService:
         self._repository = repository
         self._calendar = trading_calendar or WeekdayTradingCalendar()
 
-    @staticmethod
-    def _exchange(symbol: str) -> str:
-        return (
-            "HK"
-            if symbol.endswith(".HK")
-            else "US"
-            if symbol.rsplit(".", 1)[-1].isalpha() and not symbol.endswith((".SH", ".SZ"))
-            else "CN"
-        )
-
     def _execution_day(self, signal_day: str, symbol: str) -> str:
-        return self._calendar.next_trading_day(self._exchange(symbol), date.fromisoformat(signal_day[:10])).isoformat()
+        return self._calendar.next_trading_day(symbol_exchange(symbol), date.fromisoformat(signal_day[:10])).isoformat()
 
     def generate_orders(self, scores: list[dict], as_of: str, snapshot_id: str, top_k: int = 10) -> dict:
         ranked = sorted(scores, key=lambda item: float(item.get("score", 0)), reverse=True)[:top_k]

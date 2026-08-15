@@ -16,6 +16,7 @@ FEATURES = (
     "video_bearish_claim_count",
     "verified_catalyst_count",
     "verified_risk_count",
+    "content_attention_score",
     "author_attention_score",
     "cross_video_consensus",
     "cross_video_disagreement",

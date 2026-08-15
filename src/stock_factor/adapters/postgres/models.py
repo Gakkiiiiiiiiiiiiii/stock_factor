@@ -97,6 +97,45 @@ class FactorVersionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class FactorStatisticalTestRow(Base):
+    __tablename__ = "factor_statistical_test"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    candidate_id: Mapped[str] = mapped_column(String(64), index=True)
+    experiment_id: Mapped[str] = mapped_column(String(64), index=True)
+    raw_p_value: Mapped[float | None] = mapped_column(Float)
+    adjusted_p_value: Mapped[float | None] = mapped_column(Float)
+    q_value: Mapped[float | None] = mapped_column(Float)
+    pbo: Mapped[float | None] = mapped_column(Float)
+    effective_trials: Mapped[int] = mapped_column(Integer, default=0)
+    passed_multiple_testing: Mapped[bool] = mapped_column(default=False)
+    passed_pbo: Mapped[bool] = mapped_column(default=False)
+    method: Mapped[str] = mapped_column(String(80), default="multiple_testing_v1")
+    data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FactorFinalOosRow(Base):
+    __tablename__ = "factor_final_oos"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    factor_id: Mapped[str] = mapped_column(String(64), index=True)
+    factor_version: Mapped[int] = mapped_column(Integer)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FactorOosAuditRow(Base):
+    __tablename__ = "factor_oos_audit"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    factor_id: Mapped[str] = mapped_column(String(64), index=True)
+    factor_version: Mapped[int] = mapped_column(Integer)
+    audit_status: Mapped[str] = mapped_column(String(20), index=True)
+    violations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    warnings: Mapped[list[str]] = mapped_column(JSON, default=list)
+    audit_version: Mapped[str] = mapped_column(String(80), default="final_oos_audit_v1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class FactorPromotionDecisionRow(Base):
     __tablename__ = "factor_promotion_decision"
     decision_id: Mapped[str] = mapped_column(String(64), primary_key=True)

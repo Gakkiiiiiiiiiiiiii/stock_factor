@@ -14,3 +14,35 @@ seeds:
   - {name: ma_momentum_5_20, hypothesis: "moving average momentum", rpn: [close, ts_mean_5, close, ts_mean_20, div, cs_rank]}
   - {name: low_volatility, hypothesis: "low volatility", rpn: [ret, ts_std_20, neg, cs_rank]}
   - {name: content_sentiment, hypothesis: "verified content sentiment", rpn: [theme_sentiment, ts_sum_5, cs_rank]}
+  - {name: reversal_5d, hypothesis: "five day reversal", rpn: [close, close, ts_delay_5, div, neg, cs_rank]}
+  - {name: reversal_20d, hypothesis: "twenty day reversal", rpn: [ret, ts_sum_20, neg, cs_rank]}
+  - {name: ret_rank_reversal_10d, hypothesis: "rank reversal", rpn: [ret, ts_rank_10, neg, cs_rank]}
+  - {name: close_breakout_20d, hypothesis: "breakout momentum", rpn: [close, high, ts_max_20, div, cs_rank]}
+  - {name: close_breakdown_20d, hypothesis: "low repair", rpn: [close, low, ts_min_20, div, neg, cs_rank]}
+  - {name: days_since_high_20d, hypothesis: "near high", rpn: [high, ts_argmax_20, neg, cs_rank]}
+  - {name: days_since_low_20d, hypothesis: "near low", rpn: [low, ts_argmin_20, neg, cs_rank]}
+  - {name: bias_20d, hypothesis: "moving average bias", rpn: [close, close, ts_mean_20, div, neg, cs_rank]}
+  - {name: ret_momentum_20d, hypothesis: "return momentum", rpn: [ret, ts_mean_20, cs_rank]}
+  - {name: vwap_momentum_5d, hypothesis: "vwap momentum", rpn: [vwap, ts_delta_5, cs_rank]}
+  - {name: return_volume_corr_10d, hypothesis: "return volume correlation", rpn: [ret, volume, ts_corr_10, neg, cs_rank]}
+  - {name: volume_surge_5_20, hypothesis: "volume crowding", rpn: [volume, ts_mean_5, volume, ts_mean_20, div, neg, cs_rank]}
+  - {name: volume_dryup_5_20, hypothesis: "volume dryup", rpn: [volume, ts_mean_5, volume, ts_mean_20, div, cs_rank]}
+  - {name: amount_delta_5d, hypothesis: "amount change", rpn: [amount, ts_delta_5, cs_rank]}
+  - {name: amount_efficiency_10d, hypothesis: "amount efficiency", rpn: [ret, ts_mean_10, amount, ts_mean_10, div, cs_rank]}
+  - {name: price_volume_cov_10d, hypothesis: "price volume covariance", rpn: [close, volume, ts_cov_10, neg, cs_rank]}
+  - {name: volatility_contraction_20_60, hypothesis: "volatility contraction", rpn: [ret, ts_std_20, ret, ts_std_60, div, neg, cs_rank]}
+  - {name: amplitude_low_5d, hypothesis: "low amplitude", rpn: [high, low, sub, close, div, ts_mean_5, neg, cs_rank]}
+  - {name: amplitude_stability_5d, hypothesis: "amplitude stability", rpn: [high, low, div, ts_std_5, neg, cs_rank]}
+  - {name: amplitude_ratio_5_20, hypothesis: "amplitude ratio", rpn: [high, low, div, ts_mean_5, high, low, div, ts_mean_20, div, neg, cs_rank]}
+  - {name: price_range_width_20d, hypothesis: "range width", rpn: [high, ts_max_20, low, ts_min_20, sub, close, ts_mean_20, div, neg, cs_rank]}
+  - {name: vwap_deviation_stability_10d, hypothesis: "vwap stability", rpn: [close, vwap, div, ts_std_10, neg, cs_rank]}
+  - {name: lower_shadow_support_5d, hypothesis: "lower shadow support", rpn: [open, close, min, low, sub, close, div, ts_mean_5, cs_rank]}
+  - {name: upper_shadow_pressure_5d, hypothesis: "upper shadow pressure", rpn: [high, open, close, max, sub, close, div, ts_mean_5, neg, cs_rank]}
+  - {name: turnover_mean_20d, hypothesis: "low turnover", rpn: [turnover, ts_mean_20, neg, cs_rank]}
+  - {name: turnover_volatility_20d, hypothesis: "turnover stability", rpn: [turnover, ts_std_20, neg, cs_rank]}
+  - {name: high_volume_reversal_5d, hypothesis: "high volume reversal", rpn: [ret, ts_mean_5, volume, ts_mean_5, volume, ts_mean_20, div, mul, neg, cs_rank]}
+  - {name: low_volatility_reversal_5d, hypothesis: "low vol reversal", rpn: [ret, ts_mean_5, ret, ts_std_20, neg, mul, neg, cs_rank]}
+  - {name: high_volatility_reversal_5d, hypothesis: "high vol reversal", rpn: [ret, ts_mean_5, ret, ts_std_20, mul, neg, cs_rank]}
+  - {name: volume_conditioned_momentum_10d, hypothesis: "volume conditioned momentum", rpn: [ret, ts_mean_10, volume, ts_mean_5, volume, ts_mean_20, div, neg, mul, cs_rank]}
+  - {name: content_consensus, hypothesis: "content consensus", rpn: [cross_video_consensus, ts_mean_5, cs_rank]}
+  - {name: content_attention, hypothesis: "content attention", rpn: [content_attention_score, ts_mean_5, cs_rank]}

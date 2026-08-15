@@ -9,10 +9,13 @@ from sqlalchemy.orm import sessionmaker
 
 from stock_factor.adapters.postgres.models import (
     FactorCandidateRow,
+    FactorFinalOosRow,
     FactorJobRow,
     FactorLifecycleEventRow,
+    FactorOosAuditRow,
     FactorPromotionDecisionRow,
     FactorRow,
+    FactorStatisticalTestRow,
     FactorVersionRow,
     PaperCashLedgerRow,
     PaperEquityRow,
@@ -76,6 +79,7 @@ class PostgresFactorRepository:
                     feedback=(factor.metrics or {}).get("generation_feedback") or {},
                 )
                 session.add(candidate)
+                session.flush()
             version = session.scalar(
                 select(FactorVersionRow).where(
                     FactorVersionRow.factor_id == row.factor_id, FactorVersionRow.version == row.version
@@ -93,6 +97,48 @@ class PostgresFactorRepository:
                     )
                 )
             promotion = (factor.metrics or {}).get("promotion_gate") or {}
+            statistics = (factor.metrics or {}).get("statistics") or {}
+            final_oos = (factor.metrics or {}).get("final_oos") or {}
+            oos_audit = (factor.metrics or {}).get("oos_audit") or {}
+            if not session.scalar(
+                select(FactorStatisticalTestRow).where(
+                    FactorStatisticalTestRow.candidate_id == candidate.candidate_id,
+                    FactorStatisticalTestRow.experiment_id == str((factor.metrics or {}).get("data_snapshot_id") or ""),
+                )
+            ):
+                session.add(
+                    FactorStatisticalTestRow(
+                        candidate_id=candidate.candidate_id,
+                        experiment_id=str((factor.metrics or {}).get("data_snapshot_id") or "default"),
+                        raw_p_value=statistics.get("raw_p_value"),
+                        adjusted_p_value=statistics.get("adjusted_p_value"),
+                        q_value=statistics.get("q_value"),
+                        pbo=statistics.get("pbo"),
+                        effective_trials=int(statistics.get("effective_trials") or 0),
+                        passed_multiple_testing=bool(statistics.get("passed_multiple_testing")),
+                        passed_pbo=bool(statistics.get("passed_pbo")),
+                        method=str(statistics.get("method") or "multiple_testing_v1"),
+                        data_snapshot_id=(factor.metrics or {}).get("data_snapshot_id"),
+                    )
+                )
+                session.add(
+                    FactorFinalOosRow(
+                        factor_id=row.factor_id,
+                        factor_version=row.version,
+                        metrics=final_oos,
+                        data_snapshot_id=(factor.metrics or {}).get("data_snapshot_id"),
+                    )
+                )
+                session.add(
+                    FactorOosAuditRow(
+                        factor_id=row.factor_id,
+                        factor_version=row.version,
+                        audit_status=str(oos_audit.get("audit_status") or "FAILED"),
+                        violations=list(oos_audit.get("violations") or []),
+                        warnings=list(oos_audit.get("warnings") or []),
+                        audit_version=str(oos_audit.get("audit_version") or "final_oos_audit_v1"),
+                    )
+                )
             session.add(
                 FactorPromotionDecisionRow(
                     decision_id=uuid4().hex,
@@ -372,9 +418,7 @@ class PostgresPaperRepository:
         # The JSON state is a projection only.  Lots are independently
         # persisted so a replay can reproduce sellability and cost basis.
         active_symbols = set(positions)
-        for lot in session.scalars(
-            select(PaperPositionLotRow).where(PaperPositionLotRow.account_id == account_id)
-        ):
+        for lot in session.scalars(select(PaperPositionLotRow).where(PaperPositionLotRow.account_id == account_id)):
             if lot.symbol not in active_symbols:
                 lot.quantity, lot.available_quantity = 0, 0
                 lot.remaining_cost, lot.closed_at = 0.0, datetime.now(UTC)

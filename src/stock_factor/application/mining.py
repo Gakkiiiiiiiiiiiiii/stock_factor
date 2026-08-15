@@ -136,6 +136,29 @@ class FactorMiningService:
         capacity = compute_capacity_proxy(volume)
         return diagnostics, exposure, capacity
 
+    @staticmethod
+    def _mutate(candidate: dict, feedback: dict, generation_round: int) -> dict | None:
+        """Deterministic mutation fallback when an LLM proposer is unavailable."""
+        rpn = list(candidate["rpn"])
+        replacements = {"ts_mean_5": "ts_mean_10", "ts_mean_10": "ts_mean_20", "ts_delay_3": "ts_delay_5"}
+        for index, token in enumerate(rpn):
+            if token in replacements:
+                rpn[index] = replacements[token]
+                break
+        else:
+            if not rpn or rpn[-1] != "cs_rank":
+                return None
+            rpn.insert(-1, "neg")
+        return {
+            "name": f"{candidate.get('name', 'candidate')}_r{generation_round}",
+            "hypothesis": f"mutation after {feedback['reason']}: {candidate.get('hypothesis', '')}",
+            "rpn": rpn,
+            "parent_candidate_hash": candidate["candidate_hash"],
+            "generation_round": generation_round,
+            "generation_strategy": "feedback_mutation",
+            "generation_feedback": feedback,
+        }
+
     def run(self, request: dict, progress=lambda stage, value: None) -> dict:
         symbols = request.get("symbols") or []
         if not symbols:
@@ -154,39 +177,37 @@ class FactorMiningService:
         candidates = self._canonical_candidates(self._candidates(request), budget)
         horizon = int(request.get("horizon") or config.evaluation.horizon_days)
         evaluated: list[dict] = []
-        for index, candidate in enumerate(candidates):
-            rpn = candidate["rpn"]
-            max_lookback_from_rpn(rpn)
-            values = StackVM().execute(rpn, panel)
-            if values is None:
-                continue
-            split = build_research_split(values.shape[1], config.data_split, horizon)
-            preliminary = evaluate_factor(
-                values, panel["close"], horizon=horizon, eval_window=request.get("eval_window")
-            )
-            if split is None:
-                walkforward = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
-                final_oos = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
-            else:
-                walkforward = run_purged_walkforward(
-                    values,
-                    panel["close"],
-                    eval_start=split.discovery_start,
-                    eval_end=split.discovery_end,
-                    horizon=horizon,
+        explicit_candidates = bool(request.get("candidates") or request.get("use_model"))
+        round_limit = max(1, min(int(request.get("rounds") or (1 if explicit_candidates else 3)), 10))
+        candidates_per_round = max(1, int(request.get("candidates_per_round") or len(candidates)))
+        pending = candidates
+        seen = {candidate["candidate_hash"] for candidate in candidates}
+        search_rounds: list[dict] = []
+        for generation_round in range(1, round_limit + 1):
+            round_evaluated: list[dict] = []
+            for candidate in pending:
+                rpn = candidate["rpn"]
+                max_lookback_from_rpn(rpn)
+                values = StackVM().execute(rpn, panel)
+                if values is None:
+                    continue
+                split = build_research_split(values.shape[1], config.data_split, horizon)
+                preliminary = evaluate_factor(
+                    values, panel["close"], horizon=horizon, eval_window=request.get("eval_window")
                 )
-                final_oos = evaluate_factor_range(
-                    values,
-                    panel["close"],
-                    split.final_oos_start,
-                    split.final_oos_end,
-                    horizon=horizon,
-                )
-            diagnostics, exposure, capacity = self._diagnostics(values, panel)
-            recent_alpha = self._recent_alpha(values, panel["close"], horizon)
-            evaluated.append(
-                {
-                    "candidate": candidate,
+                if split is None:
+                    walkforward = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
+                    final_oos = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
+                else:
+                    walkforward = run_purged_walkforward(
+                        values, panel["close"], split.discovery_start, split.discovery_end, horizon
+                    )
+                    final_oos = evaluate_factor_range(
+                        values, panel["close"], split.final_oos_start, split.final_oos_end, horizon=horizon
+                    )
+                diagnostics, exposure, capacity = self._diagnostics(values, panel)
+                item = {
+                    "candidate": {**candidate, "generation_round": generation_round},
                     "values": values,
                     "preliminary": preliminary,
                     "walkforward": walkforward,
@@ -194,11 +215,31 @@ class FactorMiningService:
                     "diagnostics": diagnostics,
                     "exposure": exposure,
                     "capacity": capacity,
-                    "recent_alpha": recent_alpha,
+                    "recent_alpha": self._recent_alpha(values, panel["close"], horizon),
                     "split": split,
                 }
+                evaluated.append(item)
+                round_evaluated.append(item)
+                progress("evaluate", 20 + int(len(evaluated) * 55 / max(budget, 1)))
+            feedback = self._feedback(round_evaluated)
+            search_rounds.append(
+                {
+                    "round": generation_round,
+                    "candidate_count": len(pending),
+                    "evaluated_count": len(round_evaluated),
+                    "feedback": feedback,
+                }
             )
-            progress("evaluate", 20 + int((index + 1) * 55 / max(len(candidates), 1)))
+            if generation_round == round_limit or len(evaluated) >= budget or not round_evaluated:
+                break
+            proposed = [self._mutate(item["candidate"], feedback, generation_round + 1) for item in round_evaluated]
+            pending = self._canonical_candidates([item for item in proposed if item], budget - len(evaluated))[
+                :candidates_per_round
+            ]
+            pending = [item for item in pending if item["candidate_hash"] not in seen]
+            seen.update(item["candidate_hash"] for item in pending)
+            if not pending:
+                break
 
         cohort_statistics = validate_statistical_experiment(
             {
@@ -255,6 +296,10 @@ class FactorMiningService:
                 "research_split": split.diagnostics(horizon, values.shape[1]) if split else None,
                 "data_version": snapshot.data_version,
                 "data_snapshot_id": snapshot.data_snapshot_id,
+                "generation_round": candidate.get("generation_round", 1),
+                "parent_candidate_id": candidate.get("parent_candidate_hash"),
+                "generation_strategy": candidate.get("generation_strategy", "seed"),
+                "generation_feedback": candidate.get("generation_feedback") or {},
             }
             definition = FactorDefinition(
                 factor_id=uuid4().hex,
@@ -273,4 +318,5 @@ class FactorMiningService:
             "data_version": snapshot.data_version,
             "data_snapshot_id": snapshot.data_snapshot_id,
             "content_signal_count": len(signals),
+            "search_rounds": search_rounds,
         }
