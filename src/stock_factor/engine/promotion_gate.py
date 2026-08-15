@@ -24,6 +24,8 @@ def evaluate_promotion_gate(
     *,
     walkforward: dict | None,
     statistics: dict | None,
+    final_oos: dict | None = None,
+    oos_audit: dict | None = None,
     diagnostics: dict | None = None,
     exposure: dict | None = None,
     capacity: dict | None = None,
@@ -36,6 +38,7 @@ def evaluate_promotion_gate(
 ) -> PromotionGateResult:
     """Deterministic promotion gate with explicit diagnostic provenance."""
     walkforward, statistics = walkforward or {}, statistics or {}
+    final_oos, oos_audit = final_oos or {}, oos_audit or {}
     diagnostics, exposure, capacity = diagnostics or {}, exposure or {}, capacity or {}
     reasons: list[str] = []
     if not walkforward.get("passed"):
@@ -44,6 +47,10 @@ def evaluate_promotion_gate(
         reasons.append("WALKFORWARD_COVERAGE_FAILED")
     if not statistics.get("passed"):
         reasons.append("STATISTICAL_VALIDATION_FAILED")
+    if not final_oos.get("passed"):
+        reasons.append("FINAL_OOS_FAILED")
+    if oos_audit.get("audit_status") != "PASSED":
+        reasons.append("OOS_AUDIT_FAILED")
     if not diagnostics:
         reasons.append("DIAGNOSTICS_MISSING")
     else:
@@ -68,6 +75,8 @@ def evaluate_promotion_gate(
         metrics={
             "walkforward": walkforward,
             "statistics": statistics,
+            "final_oos": final_oos,
+            "oos_audit": oos_audit,
             "diagnostics": diagnostics,
             "exposure": exposure,
             "capacity": capacity,

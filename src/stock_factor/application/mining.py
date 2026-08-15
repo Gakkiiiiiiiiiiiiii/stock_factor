@@ -22,6 +22,7 @@ from stock_factor.engine.diagnostics import (
 from stock_factor.engine.exposure import compute_factor_exposures
 from stock_factor.engine.fitness import evaluate_factor, evaluate_factor_range
 from stock_factor.engine.lookback import max_lookback_from_rpn
+from stock_factor.engine.oos_audit import audit_final_oos
 from stock_factor.engine.promotion_gate import evaluate_promotion_gate
 from stock_factor.engine.purged_walkforward import run_purged_walkforward
 from stock_factor.engine.research_split import build_research_split
@@ -192,9 +193,16 @@ class FactorMiningService:
             capacity = item["capacity"]
             split = item["split"]
             statistics = cohort_statistics[candidate["candidate_hash"]]
+            oos_audit = audit_final_oos(
+                split=split,
+                final_oos=final_oos,
+                data_snapshot_id=snapshot.data_snapshot_id,
+            )
             promotion = evaluate_promotion_gate(
                 walkforward=walkforward,
                 statistics=statistics,
+                final_oos=final_oos,
+                oos_audit=oos_audit,
                 diagnostics=diagnostics,
                 exposure=exposure,
                 capacity=capacity,
@@ -207,6 +215,7 @@ class FactorMiningService:
                 "in_sample": preliminary,
                 "walkforward": walkforward,
                 "final_oos": final_oos,
+                "oos_audit": oos_audit,
                 "statistics": statistics,
                 "diagnostics": diagnostics,
                 "exposure": exposure,
