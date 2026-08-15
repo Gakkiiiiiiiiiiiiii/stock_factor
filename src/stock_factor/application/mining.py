@@ -44,6 +44,10 @@ SEEDS = [
 ]
 
 
+class ResearchIntegrityError(ValueError):
+    """Raised before persisting a candidate whose identity no longer matches its formula."""
+
+
 class FactorMiningService:
     def __init__(
         self,
@@ -184,6 +188,9 @@ class FactorMiningService:
         accepted = []
         for index, item in enumerate(evaluated):
             candidate = item["candidate"]
+            rpn = list(candidate["rpn"])
+            if hashlib.sha256(" ".join(rpn).encode()).hexdigest() != candidate["candidate_hash"]:
+                raise ResearchIntegrityError("candidate_hash does not match the candidate RPN")
             values = item["values"]
             preliminary = item["preliminary"]
             walkforward = item["walkforward"]

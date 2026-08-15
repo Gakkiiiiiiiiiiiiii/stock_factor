@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from stock_factor.application.mining import FactorMiningService
@@ -29,3 +30,18 @@ def test_model_candidate_generation_is_injected_and_vocab_checked():
     result = service.run({"symbols": [f"6000{index:02d}" for index in range(20)], "use_model": True})
     assert result["factor_count"] == 1
     assert result["factors"][0]["name"] == "model_reversal"
+
+
+def test_candidate_identity_keeps_each_rpn_and_hash_together():
+    service = FactorMiningService(FixtureMarket(), FixtureContent(), FixtureFactors())
+    candidates = [
+        {"name": "first", "hypothesis": "one", "rpn": ["ret", "cs_rank"]},
+        {"name": "second", "hypothesis": "two", "rpn": ["close", "cs_rank"]},
+        {"name": "third", "hypothesis": "three", "rpn": ["volume", "cs_rank"]},
+    ]
+    result = service.run({"symbols": [f"6000{index:02d}" for index in range(20)], "candidates": candidates})
+    assert [(item["name"], item["rpn"]) for item in result["factors"]] == [
+        (item["name"], item["rpn"]) for item in candidates
+    ]
+    for factor in result["factors"]:
+        assert factor["candidate_hash"] == hashlib.sha256(" ".join(factor["rpn"]).encode()).hexdigest()

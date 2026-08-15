@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime, time, timedelta, timezone
 
 import numpy as np
 
@@ -25,15 +25,19 @@ _CONTENT_NAMES = (
 )
 
 
-def _effective_date(signal: dict) -> date | None:
-    # A content claim can only enter a factor panel after it was available to
-    # the trading system.  ``as_of`` is an observation timestamp, not a
-    # visibility permission, so it must never be used as a fallback here.
+_CN_TZ = timezone(timedelta(hours=8))
+_FEATURE_CUTOFF = time(9, 25)
+
+
+def _available_from(signal: dict) -> datetime | None:
+    # ``as_of`` is an observation timestamp, not visibility permission, so it
+    # must never be used as a fallback for the anti-lookahead boundary.
     raw = signal.get("available_from")
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).date()
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(_CN_TZ)
     except ValueError:
         return None
 
@@ -70,13 +74,14 @@ def _content_feature_panel(
     for signal in signals:
         if str(signal.get("review_status") or "").upper() == "REJECTED":
             continue
-        effective = _effective_date(signal)
-        if effective is None:
+        available_from = _available_from(signal)
+        if available_from is None:
             continue
         rows = [code_index[symbol] for symbol in _symbols(signal) if symbol in code_index]
         for day_index, current_day in enumerate(day_dates):
-            delta = (current_day - effective).days
-            if delta <= 0 or delta > lookback_days:
+            cutoff = datetime.combine(current_day, _FEATURE_CUTOFF, tzinfo=_CN_TZ)
+            delta = (current_day - available_from.date()).days
+            if available_from > cutoff or delta < 0 or delta > lookback_days:
                 continue
             for row in rows:
                 cells.setdefault((row, day_index), []).append(signal)
