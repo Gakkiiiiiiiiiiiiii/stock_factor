@@ -12,7 +12,7 @@ from stock_factor.application.service import FactorApplication, MarketDataUnavai
 
 SERVICE_NAME = "stock_factor"
 SERVICE_VERSION = "1.0.0"
-CONTRACT_VERSIONS = ["factor.v1", "market-data.v1", "content-factor-signal.v2"]
+CONTRACT_VERSIONS = ["factor.v1", "market-data.v1", "content-factor-signal.v3"]
 
 
 def _paper_authority() -> str:

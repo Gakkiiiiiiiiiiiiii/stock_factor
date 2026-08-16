@@ -69,7 +69,13 @@ class HttpContentSignalProvider:
         )
         response.raise_for_status()
         body = response.json()
-        if body.get("contract_version") not in {None, "content-factor-signal.v1", "content-factor-signal.v2"}:
+        # P0 X-02：main 主契约为 content-factor-signal.v3；v1/v2 仅作 legacy 兼容。
+        if body.get("contract_version") not in {
+            None,
+            "content-factor-signal.v1",
+            "content-factor-signal.v2",
+            "content-factor-signal.v3",
+        }:
             raise ValueError(f"unsupported content signal contract: {body['contract_version']}")
         return body.get("items", [])
 
