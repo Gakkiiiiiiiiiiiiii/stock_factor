@@ -7,7 +7,6 @@ from stock_factor.adapters.postgres.repositories import PostgresFactorRepository
 from stock_factor.api.dependencies import build_application
 from stock_factor.api.main import create_app
 from stock_factor.domain.factor import FactorDefinition
-
 from tests.test_integration import FixtureContent, FixtureMarket
 
 

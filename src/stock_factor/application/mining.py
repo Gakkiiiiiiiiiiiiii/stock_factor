@@ -9,6 +9,7 @@ import numpy as np
 
 from stock_factor.application.final_oos_evaluation import (
     FinalOosAuthorizationError,
+    FinalOosCandidateInput,
     FinalOosDataProvider,
     FinalOosEvaluationService,
     InMemoryCandidateSealStore,
@@ -444,24 +445,32 @@ class FactorMiningService:
                 getattr(snapshot, "data_snapshot_id", "") or "",
                 candidate_set_hash,
             )
+            # P0 F-01：一个 Experiment → 一个 Finalist Cohort → 只打开一次 Final OOS 授权。
+            cohort_inputs: list[FinalOosCandidateInput] = []
             for item in frozen_items:
                 # §22：dataset = warmup + Final OOS 窗口（完整面板），统计只在 OOS 窗口内。
                 values_oos, closes_oos = self._oos_data.load(experiment, (item["values"], panel["close"]))
-                try:
-                    item["final_oos"] = self._oos_service.evaluate_for_experiment(
-                        experiment,
-                        item["candidate"]["candidate_hash"],
-                        values_oos,
-                        closes_oos,
-                        item["split"],
-                        horizon,
+                cohort_inputs.append(
+                    FinalOosCandidateInput(
+                        candidate_hash=item["candidate"]["candidate_hash"],
+                        values=values_oos,
+                        closes=closes_oos,
                     )
-                except OosWindowInvalidatedError:
-                    # §24：OOS 区间失效 => 本次实验 OOS_INVALIDATED。
+                )
+            try:
+                cohort_results = self._oos_service.evaluate_cohort_for_experiment(
+                    experiment, cohort_inputs, frozen_items[0]["split"], horizon
+                )
+                for item, metrics in zip(frozen_items, cohort_results):
+                    item["final_oos"] = metrics
+            except OosWindowInvalidatedError:
+                # §24：OOS 区间失效 => 本次实验 OOS_INVALIDATED。
+                for item in frozen_items:
                     item["final_oos"] = {"passed": False, "reason": "OOS_WINDOW_INVALIDATED"}
-                    experiment.transition(OOS_INVALIDATED)
-                except FinalOosAuthorizationError:
-                    # cohort 中实验已因首个 finalist 失效：后续 finalist 同样不得评估。
+                experiment.transition(OOS_INVALIDATED)
+            except FinalOosAuthorizationError:
+                # 授权缺失/已消费：同样不得留下“实验已成功”的假状态。
+                for item in frozen_items:
                     item["final_oos"] = {"passed": False, "reason": "OOS_WINDOW_INVALIDATED"}
             for item in finalists:
                 if item["split"] is None:

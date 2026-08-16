@@ -11,7 +11,6 @@ def test_mining_job_rejected_when_quant_unavailable(tmp_path):
 
     from stock_factor.api.dependencies import build_application
     from stock_factor.api.main import create_app
-
     from tests.test_integration import FixtureContent
 
     class BrokenMarket:

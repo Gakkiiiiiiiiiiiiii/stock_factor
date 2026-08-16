@@ -9,10 +9,12 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import numpy as np
 
+from stock_factor.application.finalist_selection import MAX_FINALIST_COUNT
 from stock_factor.application.oos_authorization import OosAuthorizationError, OosAuthorizationStore
 from stock_factor.engine.fitness import evaluate_factor_range
 from stock_factor.engine.oos_seal import (
@@ -29,6 +31,15 @@ class FinalOosAuthorizationError(RuntimeError):
     详细修改方案 P0-2：数据库级授权异常（缺失/已消费/已失效）会被转为
     本异常抛出，调用方按同一策略处理。
     """
+
+
+@dataclass(frozen=True)
+class FinalOosCandidateInput:
+    """P0 F-01：cohort 内单个 finalist 的最小评估输入。"""
+
+    candidate_hash: str
+    values: np.ndarray
+    closes: np.ndarray
 
 
 class FinalOosDataProvider:
@@ -146,6 +157,69 @@ class FinalOosEvaluationService:
         """OOS 结果进入下一轮搜索时调用：OOS 区间立即失效（§13.4 / 收尾文档 §24）。"""
         self._seal.invalidate_oos_window(candidate_hash, reason)
 
+    def evaluate_cohort_for_experiment(
+        self,
+        experiment,
+        candidates: list[FinalOosCandidateInput],
+        split: FactorResearchSplit,
+        horizon: int,
+    ) -> list[dict[str, Any]]:
+        """P0 F-01：一个 Experiment → 一个 Finalist Cohort → 一次授权消费。
+
+        语义（不得改成每 candidate 一份 authorization）：
+        1. 验证 experiment.status == OOS_AUTHORIZED；
+        2. 验证 1 <= cohort size <= MAX_FINALIST_COUNT；
+        3. 所有 candidate 必须已 Freeze，且 Freeze 指向同一个预注册 Final OOS Snapshot；
+        4. consume(experiment_id) 只调用一次；
+        5. cohort 全部 candidate 评估成功后才 transition("OOS_EVALUATED")；
+        6. retry 语义：deterministic partial resume —— consume 后已记录的评估
+           直接复用，未完成的 candidate 可继续评估，不重新打开 OOS 数据。
+        """
+        if getattr(experiment, "status", None) != "OOS_AUTHORIZED":
+            raise FinalOosAuthorizationError(
+                f"实验 {getattr(experiment, 'experiment_id', '?')} 未授权 Final OOS（当前 {getattr(experiment, 'status', '?')}）"
+            )
+        # 授权记录缺失快速失败（在 consume 之前，语义等同数据库级拒绝）。
+        if self._authorizations is not None:
+            record = self._authorizations.get(getattr(experiment, "experiment_id", ""))
+            if record is None:
+                raise FinalOosAuthorizationError(
+                    f"实验 {getattr(experiment, 'experiment_id', '?')} 没有 Final OOS 授权记录"
+                )
+        if not 1 <= len(candidates) <= MAX_FINALIST_COUNT:
+            raise ValueError(
+                f"Final OOS cohort 大小必须满足 1 <= size <= {MAX_FINALIST_COUNT}，实际 {len(candidates)}"
+            )
+        # 预检查：全部 candidate 必须已 Freeze，且指向同一个 Final OOS Snapshot。
+        # 任何校验失败都发生在 consume 之前，不消耗一次性授权。
+        freezes: list[CandidateFreeze] = []
+        for candidate in candidates:
+            freeze = self._seal.get_freeze(candidate.candidate_hash)
+            if freeze is None:
+                raise CandidateUnfrozenError(
+                    f"candidate {candidate.candidate_hash} 未冻结，禁止进行 Final OOS 评估"
+                )
+            freezes.append(freeze)
+        snapshot_ids = {freeze.final_oos_snapshot_id for freeze in freezes}
+        if len(snapshot_ids) != 1:
+            raise FinalOosAuthorizationError(
+                f"cohort 内 Freeze 必须指向同一个预注册 Final OOS Snapshot，实际 {sorted(snapshot_ids)}"
+            )
+        # 一次性消费：整个 cohort 共享同一次 authorization consume。
+        if self._authorizations is not None:
+            try:
+                self._authorizations.consume(getattr(experiment, "experiment_id", ""))
+            except OosAuthorizationError as exc:
+                raise FinalOosAuthorizationError(str(exc)) from exc
+        results: list[dict[str, Any]] = []
+        for candidate in candidates:
+            # evaluate() 内部对已记录结果确定性重放（partial resume），
+            # 中途失败直接抛出：experiment 保持 OOS_AUTHORIZED，不产生假成功状态。
+            results.append(self.evaluate(candidate.candidate_hash, candidate.values, candidate.closes, split, horizon))
+        if experiment.status == "OOS_AUTHORIZED":
+            experiment.transition("OOS_EVALUATED")
+        return results
+
     def evaluate_for_experiment(
         self,
         experiment,
@@ -155,30 +229,17 @@ class FinalOosEvaluationService:
         split: FactorResearchSplit,
         horizon: int,
     ) -> dict[str, Any]:
-        """收尾文档 §23：以实验授权为前提的一次性 Final OOS 评估。
+        """兼容入口：只允许封装单 candidate cohort，复用同一套消费语义。
 
-        输入：FrozenCandidate + FinalOosDataset + EvaluationConfig，
-        而不是完整搜索上下文；评估成功后实验进入 OOS_EVALUATED。
+        不得独立 consume()；多 finalist 场景必须改用 evaluate_cohort_for_experiment。
         """
-        if getattr(experiment, "status", None) != "OOS_AUTHORIZED":
-            raise FinalOosAuthorizationError(
-                f"实验 {getattr(experiment, 'experiment_id', '?')} 未授权 Final OOS（当前 {getattr(experiment, 'status', '?')}）"
-            )
-        # P0-2：数据库事务级一次性消费；并发下只有一个 worker 能成功。
-        if self._authorizations is not None:
-            try:
-                self._authorizations.consume(getattr(experiment, "experiment_id", ""))
-            except OosAuthorizationError as exc:
-                raise FinalOosAuthorizationError(str(exc)) from exc
-        metrics = self.evaluate(candidate_hash, values, closes, split, horizon)
-        # cohort（finalist_count > 1）场景下只有首次评估推动状态机。
-        if experiment.status == "OOS_AUTHORIZED":
-            experiment.transition("OOS_EVALUATED")
-        return metrics
+        cohort = [FinalOosCandidateInput(candidate_hash=candidate_hash, values=values, closes=closes)]
+        return self.evaluate_cohort_for_experiment(experiment, cohort, split, horizon)[0]
 
 
 __all__ = [
     "CandidateSealStore",
+    "FinalOosCandidateInput",
     "FinalOosEvaluationService",
     "FinalOosDataProvider",
     "FinalOosAuthorizationError",
