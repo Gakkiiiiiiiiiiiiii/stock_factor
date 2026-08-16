@@ -46,14 +46,29 @@ endpoints:
     method: GET
     path: /health/version
 research_integrity:
-  # §13 / §78 Final OOS 真隔离
+  # §13 / §78 Final OOS 真隔离（收尾文档 §14-§25 强化）
   - Candidate Search 只能访问 Discovery Snapshot
   - Preliminary Fitness / FDR / PBO / DSR / Recent Alpha 全部不得引用 Final OOS
-  - 进入 Final OOS 前必须生成 Candidate Freeze（candidate_hash/formula/dsl_version/
-    feature_set_version/discovery_snapshot_id/candidate_frozen_at）
-  - FinalOosEvaluationService 独立执行、一次性使用
-  - OOS 结果反馈进入搜索 => OOS 区间立即失效（OOS_WINDOW_INVALIDATED）
+  - Generation Loop 禁止 freeze_candidate / 评估 Final OOS（只产生 discovery 证据）
+  - Discovery Gate（签名无 final_oos）→ Finalist Selection（默认 1 个，cohort ≤ 3）
+  - ResearchExperiment 状态机：CREATED → DISCOVERY_RUNNING → DISCOVERY_COMPLETED →
+    FINALIST_SELECTED → FROZEN → OOS_AUTHORIZED → OOS_EVALUATED → COMPLETED
+  - FinalOosEvaluationService 独立执行、一次性使用；未冻结/未授权禁止评估
+  - OOS 结果反馈进入搜索 => OOS 区间立即失效（OOS_WINDOW_INVALIDATED / OOS_INVALIDATED）
   - Experiment 必须分别保存 discovery_snapshot_id / final_oos_snapshot_id（§86）
+  - forward return 不得越过评估窗口边界（防未来函数）
+factor_status:
+  # 收尾文档 §27：Mining 不直接进入 PAPER_TRADING（Paper Authority 属于 quant）
+  - CANDIDATE
+  - DISCOVERY_PASSED
+  - OOS_FAILED
+  - PAPER_ELIGIBLE
+  - RETIRED
+paper_deprecation:
+  # 收尾文档 §26：Paper 端点为兼容 proxy，内部转发 quant trading.v1
+  endpoints: [/api/v1/paper/orders/generate, /api/v1/paper/run, /api/v1/paper/state, /api/v1/paper/equity, /api/v1/paper/replay]
+  headers: { Deprecation: "true", X-Deprecated-By: quant/trading.v1 }
+  authority_switch: FACTOR_PAPER_AUTHORITY=quant
 dependencies:
   allowed: [quant HTTP, stock_content HTTP, Model API, PostgreSQL]
   forbidden: [stock_agent, quant Python import, stock_content Python import]

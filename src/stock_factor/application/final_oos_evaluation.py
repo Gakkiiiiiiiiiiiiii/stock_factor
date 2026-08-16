@@ -22,6 +22,27 @@ from stock_factor.engine.oos_seal import (
 from stock_factor.engine.research_split import FactorResearchSplit
 
 
+class FinalOosAuthorizationError(RuntimeError):
+    """收尾文档 §23：实验未处于 OOS_AUTHORIZED 时禁止读取/评估 Final OOS。"""
+
+
+class FinalOosDataProvider:
+    """收尾文档 §21/§23：Final OOS 数据只在实验授权后才允许加载。
+
+    Discovery / Candidate Search 进程中 Final OOS 数据不得进入内存；
+    只有完成 Finalist Selection + Candidate Freeze 并授权后才允许 load。
+
+    OOS Warmup（§22）：返回的 dataset 覆盖 warmup + Final OOS 窗口
+    （即完整 values/close 面板），但统计只允许 [final_oos_start, final_oos_end)。
+    """
+
+    def load(self, experiment, dataset):
+        status = getattr(experiment, "status", None)
+        if status != "OOS_AUTHORIZED":
+            raise FinalOosAuthorizationError(f"实验状态 {status} 不允许加载 Final OOS 数据（需 OOS_AUTHORIZED）")
+        return dataset
+
+
 class CandidateSealStore(Protocol):
     """Candidate Freeze 与 OOS 评估记录的持久化端口。"""
 
@@ -110,12 +131,38 @@ class FinalOosEvaluationService:
         return metrics
 
     def report_feedback_into_search(self, candidate_hash: str, reason: str = "OOS_RESULT_USED_IN_SEARCH") -> None:
-        """OOS 结果进入下一轮搜索时调用：OOS 区间立即失效（§13.4）。"""
+        """OOS 结果进入下一轮搜索时调用：OOS 区间立即失效（§13.4 / 收尾文档 §24）。"""
         self._seal.invalidate_oos_window(candidate_hash, reason)
+
+    def evaluate_for_experiment(
+        self,
+        experiment,
+        candidate_hash: str,
+        values: np.ndarray,
+        closes: np.ndarray,
+        split: FactorResearchSplit,
+        horizon: int,
+    ) -> dict[str, Any]:
+        """收尾文档 §23：以实验授权为前提的一次性 Final OOS 评估。
+
+        输入：FrozenCandidate + FinalOosDataset + EvaluationConfig，
+        而不是完整搜索上下文；评估成功后实验进入 OOS_EVALUATED。
+        """
+        if getattr(experiment, "status", None) != "OOS_AUTHORIZED":
+            raise FinalOosAuthorizationError(
+                f"实验 {getattr(experiment, 'experiment_id', '?')} 未授权 Final OOS（当前 {getattr(experiment, 'status', '?')}）"
+            )
+        metrics = self.evaluate(candidate_hash, values, closes, split, horizon)
+        # cohort（finalist_count > 1）场景下只有首次评估推动状态机。
+        if experiment.status == "OOS_AUTHORIZED":
+            experiment.transition("OOS_EVALUATED")
+        return metrics
 
 
 __all__ = [
     "CandidateSealStore",
     "FinalOosEvaluationService",
+    "FinalOosDataProvider",
+    "FinalOosAuthorizationError",
     "InMemoryCandidateSealStore",
 ]

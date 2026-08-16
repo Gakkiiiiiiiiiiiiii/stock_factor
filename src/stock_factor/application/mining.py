@@ -8,14 +8,27 @@ from uuid import uuid4
 import numpy as np
 
 from stock_factor.application.final_oos_evaluation import (
+    FinalOosAuthorizationError,
     FinalOosEvaluationService,
+    FinalOosDataProvider,
     InMemoryCandidateSealStore,
 )
+from stock_factor.application.finalist_selection import select_finalists
 from stock_factor.application.panel import build_feature_panel
 from stock_factor.application.seed_library import Alpha191SeedLibrary
 from stock_factor.application.statistical_experiment import (
     rank_ic_series,
     validate_statistical_experiment,
+)
+from stock_factor.domain.experiment import (
+    COMPLETED,
+    DISCOVERY_COMPLETED,
+    DISCOVERY_RUNNING,
+    FINALIST_SELECTED,
+    FROZEN,
+    OOS_INVALIDATED,
+    SELECTION_POLICY_VERSION,
+    ResearchExperiment,
 )
 from stock_factor.domain.factor import FactorDefinition
 from stock_factor.engine.diagnostics import (
@@ -24,6 +37,7 @@ from stock_factor.engine.diagnostics import (
     compute_ic_decay,
     compute_turnover,
 )
+from stock_factor.engine.discovery_gate import evaluate_discovery_gate
 from stock_factor.engine.exposure import compute_factor_exposures
 from stock_factor.engine.fitness import evaluate_factor, evaluate_factor_range
 from stock_factor.engine.lookback import max_lookback_from_rpn
@@ -65,8 +79,9 @@ class FactorMiningService:
     ) -> None:
         self._market, self._content, self._factors, self._model = market, content, factors, model
         self._seeds = seeds or Alpha191SeedLibrary()
-        # Final OOS 必须独立于候选搜索（设计文档 §13/§78）。
+        # Final OOS 必须独立于候选搜索（集成文档 §13/§78；收尾文档 §14-§25）。
         self._oos_service = final_oos_service or FinalOosEvaluationService(InMemoryCandidateSealStore())
+        self._oos_data = FinalOosDataProvider()
 
     def _candidates(self, request: dict) -> list[dict]:
         supplied = list(request.get("candidates") or [])
@@ -247,16 +262,15 @@ class FactorMiningService:
                 if values is None:
                     continue
                 split = build_research_split(values.shape[1], config.data_split, horizon)
-                freeze: CandidateFreeze | None = None
                 if split is None:
                     preliminary = evaluate_factor(
                         values, panel["close"], horizon=horizon, eval_window=request.get("eval_window")
                     )
                     walkforward = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
-                    final_oos = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
                 else:
-                    # §13.2：Candidate Search 只能看到 Discovery Snapshot。
-                    # Preliminary Fitness 严格限制在 Discovery 窗口内。
+                    # 收尾文档 §16：Generation Loop 只生成 discovery 证据
+                    # （preliminary/walkforward/diagnostics/exposure/capacity/recent_alpha），
+                    # 不得 freeze_candidate / 评估 Final OOS（§21：OOS 数据不进入搜索进程）。
                     eval_window = request.get("eval_window")
                     preliminary_start = (
                         max(split.discovery_start, split.discovery_end - int(eval_window))
@@ -269,27 +283,6 @@ class FactorMiningService:
                     walkforward = run_purged_walkforward(
                         values, panel["close"], split.discovery_start, split.discovery_end, horizon
                     )
-                    # §13.3 Candidate Freeze → §13.4 独立一次性 Final OOS 评估。
-                    refs = derive_snapshot_refs(
-                        snapshot.data_snapshot_id,
-                        (split.discovery_start, split.discovery_end),
-                        (split.final_oos_start, split.final_oos_end),
-                    )
-                    freeze = CandidateFreeze(
-                        candidate_hash=candidate["candidate_hash"],
-                        formula=list(rpn),
-                        dsl_version=DSL_VERSION,
-                        feature_set_version=panel_feature_version,
-                        discovery_snapshot_id=refs.discovery_snapshot_id,
-                        final_oos_snapshot_id=refs.final_oos_snapshot_id,
-                    )
-                    self._oos_service.freeze_candidate(freeze)
-                    try:
-                        final_oos = self._oos_service.evaluate(
-                            candidate["candidate_hash"], values, panel["close"], split, horizon
-                        )
-                    except OosWindowInvalidatedError:
-                        final_oos = {"passed": False, "reason": "OOS_WINDOW_INVALIDATED"}
                 discovery_values = values[:, : split.discovery_end] if split else values
                 discovery_close = panel["close"][:, : split.discovery_end] if split else panel["close"]
                 diagnostics, exposure, capacity = self._diagnostics(values, panel)
@@ -298,14 +291,14 @@ class FactorMiningService:
                     "values": values,
                     "preliminary": preliminary,
                     "walkforward": walkforward,
-                    "final_oos": final_oos,
+                    "final_oos": None,
                     "diagnostics": diagnostics,
                     "exposure": exposure,
                     "capacity": capacity,
                     # §13.2：Recent Alpha 仅在 Discovery 窗口内计算。
                     "recent_alpha": self._recent_alpha(discovery_values, discovery_close, horizon),
                     "split": split,
-                    "freeze": freeze.to_dict() if freeze else None,
+                    "freeze": None,
                 }
                 evaluated.append(item)
                 round_evaluated.append(item)
@@ -354,6 +347,117 @@ class FactorMiningService:
                 for item in evaluated
             }
         )
+        # 收尾文档 §15/§17：Discovery Gate 只使用 discovery 证据，签名无 final_oos。
+        discovery_gates = {
+            item["candidate"]["candidate_hash"]: evaluate_discovery_gate(
+                walkforward=item["walkforward"],
+                statistics=cohort_statistics[item["candidate"]["candidate_hash"]],
+                diagnostics=item["diagnostics"],
+                exposure=item["exposure"],
+                capacity=item["capacity"],
+                recent_alpha=item["recent_alpha"],
+            )
+            for item in evaluated
+        }
+        # §19：ResearchExperiment 状态机贯穿整个研究流程。
+        finalist_count = max(1, min(int(request.get("finalist_count") or 1), 3))
+        experiment_config_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "symbols": symbols,
+                    "start": start,
+                    "end": end,
+                    "horizon": horizon,
+                    "candidate_budget": budget,
+                    "round_limit": round_limit,
+                    "finalist_count": finalist_count,
+                    "selection_policy_version": SELECTION_POLICY_VERSION,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:16]
+        experiment = ResearchExperiment(
+            symbols=symbols,
+            config_hash=experiment_config_hash,
+            candidate_budget=budget,
+            round_limit=round_limit,
+            finalist_count=finalist_count,
+        )
+        experiment.transition(DISCOVERY_RUNNING)
+        experiment.transition(DISCOVERY_COMPLETED)
+        # §18：Finalist Selection 在 Final OOS 之前，默认唯一 Primary Candidate。
+        finalists = select_finalists(evaluated, discovery_gates, finalist_count) if evaluated else []
+        finalist_hashes = {item["candidate"]["candidate_hash"] for item in finalists}
+        experiment.transition(FINALIST_SELECTED)
+        selected_at = datetime.now(UTC).isoformat(timespec="seconds")
+
+        refs = None
+        if finalists and finalists[0]["split"] is not None:
+            primary_split = finalists[0]["split"]
+            refs = derive_snapshot_refs(
+                snapshot.data_snapshot_id,
+                (primary_split.discovery_start, primary_split.discovery_end),
+                (primary_split.final_oos_start, primary_split.final_oos_end),
+            )
+            experiment.discovery_snapshot_id = refs.discovery_snapshot_id
+            experiment.final_oos_snapshot_id = refs.final_oos_snapshot_id
+
+        if finalists:
+            # §20：Candidate Freeze（扩展字段）——全部 finalist 在 OOS 前冻结。
+            frozen_items: list[dict] = []
+            for item in finalists:
+                if item["split"] is None:
+                    continue
+                item_refs = refs or derive_snapshot_refs(
+                    snapshot.data_snapshot_id,
+                    (item["split"].discovery_start, item["split"].discovery_end),
+                    (item["split"].final_oos_start, item["split"].final_oos_end),
+                )
+                item["freeze"] = CandidateFreeze(
+                    candidate_hash=item["candidate"]["candidate_hash"],
+                    formula=list(item["candidate"]["rpn"]),
+                    dsl_version=DSL_VERSION,
+                    feature_set_version=panel_feature_version,
+                    discovery_snapshot_id=item_refs.discovery_snapshot_id,
+                    final_oos_snapshot_id=item_refs.final_oos_snapshot_id,
+                    experiment_id=experiment.experiment_id,
+                    discovery_config_hash=experiment_config_hash,
+                    selection_policy_version=SELECTION_POLICY_VERSION,
+                    selection_rank=item.get("selection_rank"),
+                    research_code_version=experiment.code_version,
+                    selected_at=selected_at,
+                )
+                self._oos_service.freeze_candidate(item["freeze"])
+                frozen_items.append(item)
+
+        if finalists and frozen_items:
+            experiment.transition(FROZEN)
+            # §23：FROZEN → OOS_AUTHORIZED 后才允许加载 Final OOS 数据。
+            experiment.authorize_oos()
+            for item in frozen_items:
+                # §22：dataset = warmup + Final OOS 窗口（完整面板），统计只在 OOS 窗口内。
+                values_oos, closes_oos = self._oos_data.load(experiment, (item["values"], panel["close"]))
+                try:
+                    item["final_oos"] = self._oos_service.evaluate_for_experiment(
+                        experiment,
+                        item["candidate"]["candidate_hash"],
+                        values_oos,
+                        closes_oos,
+                        item["split"],
+                        horizon,
+                    )
+                except OosWindowInvalidatedError:
+                    # §24：OOS 区间失效 => 本次实验 OOS_INVALIDATED。
+                    item["final_oos"] = {"passed": False, "reason": "OOS_WINDOW_INVALIDATED"}
+                    experiment.transition(OOS_INVALIDATED)
+                except FinalOosAuthorizationError:
+                    # cohort 中实验已因首个 finalist 失效：后续 finalist 同样不得评估。
+                    item["final_oos"] = {"passed": False, "reason": "OOS_WINDOW_INVALIDATED"}
+            for item in finalists:
+                if item["split"] is None:
+                    item["final_oos"] = {"passed": False, "reason": "INSUFFICIENT_RESEARCH_HISTORY"}
+
         accepted = []
         for index, item in enumerate(evaluated):
             candidate = item["candidate"]
@@ -370,7 +474,9 @@ class FactorMiningService:
             recent_alpha = item["recent_alpha"]
             split = item["split"]
             freeze = item.get("freeze")
+            is_finalist = candidate["candidate_hash"] in finalist_hashes
             statistics = cohort_statistics[candidate["candidate_hash"]]
+            discovery_gate = discovery_gates[candidate["candidate_hash"]]
             oos_audit = audit_final_oos(
                 split=split,
                 final_oos=final_oos,
@@ -387,9 +493,19 @@ class FactorMiningService:
                 recent_alpha=recent_alpha,
                 data_snapshot_id=snapshot.data_snapshot_id,
             ).model_dump()
-            # Mining never activates a factor.  A passing research gate only
-            # makes it eligible for the separate paper-trading approval flow.
-            status = "PAPER_TRADING" if promotion["passed"] and final_oos.get("passed") else "CANDIDATE"
+            # 收尾文档 §27：Factor 状态不再直接进入 PAPER_TRADING（Paper Authority 属于 Quant）。
+            if is_finalist:
+                if final_oos and final_oos.get("passed") and promotion["passed"]:
+                    status = "PAPER_ELIGIBLE"
+                elif final_oos and final_oos.get("passed"):
+                    status = "DISCOVERY_PASSED"
+                else:
+                    status = "OOS_FAILED"
+            elif discovery_gate["passed"]:
+                status = "DISCOVERY_PASSED"
+            else:
+                status = "CANDIDATE"
+            freeze_dict = freeze.to_dict() if isinstance(freeze, CandidateFreeze) else freeze
             metrics = {
                 "in_sample": preliminary,
                 "walkforward": walkforward,
@@ -401,13 +517,16 @@ class FactorMiningService:
                 "capacity": capacity,
                 "recent_alpha": recent_alpha,
                 "promotion_gate": promotion,
+                "discovery_gate": discovery_gate,
+                "is_finalist": is_finalist,
+                "selection_rank": item.get("selection_rank"),
                 "research_split": split.diagnostics(horizon, values.shape[1]) if split else None,
                 "data_version": snapshot.data_version,
                 "data_snapshot_id": snapshot.data_snapshot_id,
                 # §86：Experiment 必须分别保存 discovery / final OOS 快照引用。
-                "discovery_snapshot_id": freeze["discovery_snapshot_id"] if freeze else None,
-                "final_oos_snapshot_id": freeze["final_oos_snapshot_id"] if freeze else None,
-                "candidate_frozen_at": freeze["candidate_frozen_at"] if freeze else None,
+                "discovery_snapshot_id": freeze_dict["discovery_snapshot_id"] if freeze_dict else (refs.discovery_snapshot_id if refs else None),
+                "final_oos_snapshot_id": freeze_dict["final_oos_snapshot_id"] if freeze_dict else (refs.final_oos_snapshot_id if refs else None),
+                "candidate_frozen_at": freeze_dict["candidate_frozen_at"] if freeze_dict else None,
                 "dsl_version": DSL_VERSION,
                 "feature_set_version": panel_feature_version,
                 "candidate_search_window": "discovery_only",
@@ -415,6 +534,8 @@ class FactorMiningService:
                 "parent_candidate_id": candidate.get("parent_candidate_hash"),
                 "generation_strategy": candidate.get("generation_strategy", "seed"),
                 "generation_feedback": candidate.get("generation_feedback") or {},
+                # 收尾文档 §19/§39：实验血缘。
+                "research_experiment_id": experiment.experiment_id,
             }
             definition = FactorDefinition(
                 factor_id=uuid4().hex,
@@ -427,6 +548,8 @@ class FactorMiningService:
             )
             accepted.append(self._factors.save(definition))
             progress("promotion", 75 + int((index + 1) * 20 / max(len(evaluated), 1)))
+        if experiment.status not in {COMPLETED, "FAILED", OOS_INVALIDATED}:
+            experiment.transition(COMPLETED)
         return {
             "factor_count": len(accepted),
             "factors": accepted,
@@ -435,4 +558,7 @@ class FactorMiningService:
             "content_signal_count": len(signals),
             "search_rounds": search_rounds,
             "correlation_duplicates": correlation_duplicates,
+            "experiment": experiment.to_dict(),
+            "finalists": sorted(finalist_hashes),
+            "finalist_count": finalist_count,
         }

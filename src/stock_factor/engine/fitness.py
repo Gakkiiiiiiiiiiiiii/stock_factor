@@ -36,8 +36,9 @@ def evaluate_factor(
     eval_window: int | None = None,
     thresholds: EvaluationThresholds | None = None,
 ) -> dict:
-    end = max(0, factor_panel.shape[1] - horizon)
-    start = max(0, end - eval_window) if eval_window else 0
+    # 全窗口评估：逻辑边界 = 面板长度，horizon 截断由 range 内部处理。
+    end = factor_panel.shape[1]
+    start = max(0, end - horizon - eval_window) if eval_window else 0
     return evaluate_factor_range(factor_panel, closes, start, end, horizon, top_k, thresholds)
 
 
@@ -56,7 +57,11 @@ def evaluate_factor_range(
     if end <= start:
         return {"passed": False, "coverage": 0.0, "fitness": float("-inf"), "warning": "eval range too short"}
     forward = np.full((symbols, days), np.nan)
-    forward[:, :-horizon] = closes[:, horizon:] / closes[:, :-horizon] - 1
+    # 收尾文档 §21：forward return 不得越过评估窗口边界（否则 discovery 评估
+    # 会读到 Final OOS 数据，构成未来函数）：仅当 t + horizon < eval_end 时有效。
+    limit = max(0, min(days - horizon, eval_end - horizon))
+    if limit > 0:
+        forward[:, :limit] = closes[:, horizon : horizon + limit] / closes[:, :limit] - 1
     ics, rank_ics, periods = [], [], []
     selected = top_k or max(5, int(symbols * 0.01))
     last_day = start - horizon

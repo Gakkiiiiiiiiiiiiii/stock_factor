@@ -44,7 +44,7 @@ def feature_set_version(panel_keys: list[str]) -> str:
 
 @dataclass(frozen=True)
 class CandidateFreeze:
-    """§13.3 Candidate Freeze 记录。"""
+    """§13.3 Candidate Freeze 记录（收尾文档 §20 扩展）。"""
 
     candidate_hash: str
     formula: list[str]
@@ -53,6 +53,13 @@ class CandidateFreeze:
     discovery_snapshot_id: str
     final_oos_snapshot_id: str
     candidate_frozen_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
+    # 收尾文档 §20 扩展字段
+    experiment_id: str | None = None
+    discovery_config_hash: str | None = None
+    selection_policy_version: str | None = None
+    selection_rank: int | None = None
+    research_code_version: str | None = None
+    selected_at: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)

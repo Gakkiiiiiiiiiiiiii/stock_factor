@@ -8,10 +8,22 @@ from pydantic import BaseModel, Field
 
 from stock_factor.api.dependencies import build_application
 from stock_factor.application.service import FactorApplication, MarketDataUnavailableError
+from stock_factor.adapters.http.quant_paper_client import QuantPaperClient, QuantPaperUnavailableError
 
 SERVICE_NAME = "stock_factor"
 SERVICE_VERSION = "1.0.0"
 CONTRACT_VERSIONS = ["factor.v1", "market-data.v1", "content-factor-signal.v2"]
+
+
+def _paper_authority() -> str:
+    """收尾文档 §26：FACTOR_PAPER_AUTHORITY=quant 时 Paper Authority 属于 quant trading.v1。"""
+    return os.getenv("FACTOR_PAPER_AUTHORITY", "local").lower()
+
+
+def _mark_deprecated(response: Response) -> None:
+    # §26：Factor Paper 兼容端点显式标记弃用，权威在 quant/trading.v1。
+    response.headers["Deprecation"] = "true"
+    response.headers["X-Deprecated-By"] = "quant/trading.v1"
 
 
 class MiningJobRequest(BaseModel):
@@ -136,8 +148,17 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
     def score_alpha(request: AlphaScoreRequest) -> dict:
         return {"contract_version": "factor.v1", "data": application.alpha_score(request.symbols, request.as_of)}
 
+    quant_paper = QuantPaperClient()
+
     @app.post("/api/v1/paper/orders/generate")
-    def generate_orders(request: PaperOrderRequest) -> dict:
+    def generate_orders(request: PaperOrderRequest, response: Response) -> dict:
+        _mark_deprecated(response)
+        if _paper_authority() == "quant":
+            try:
+                data = quant_paper.generate_orders(request.scores, request.as_of, request.data_snapshot_id, request.top_k)
+            except QuantPaperUnavailableError as exc:
+                raise HTTPException(status_code=503, detail={"code": "QUANT_UNAVAILABLE", "message": str(exc)}) from exc
+            return {"contract_version": "trading.v1", "authority": "quant", "data": data}
         return {
             "contract_version": "factor.v1",
             "data": application.generate_paper_orders(
@@ -146,22 +167,50 @@ def create_app(service: FactorApplication | None = None) -> FastAPI:
         }
 
     @app.post("/api/v1/paper/run")
-    def run_paper(request: PaperRunRequest) -> dict:
+    def run_paper(request: PaperRunRequest, response: Response) -> dict:
+        _mark_deprecated(response)
+        if _paper_authority() == "quant":
+            try:
+                data = quant_paper.run(request.as_of, request.data_snapshot_id, request.market_prices)
+            except QuantPaperUnavailableError as exc:
+                raise HTTPException(status_code=503, detail={"code": "QUANT_UNAVAILABLE", "message": str(exc)}) from exc
+            return {"contract_version": "trading.v1", "authority": "quant", "data": data}
         return {
             "contract_version": "factor.v1",
             "data": application.run_paper(request.as_of, request.data_snapshot_id, request.market_prices),
         }
 
     @app.get("/api/v1/paper/state")
-    def paper_state() -> dict:
+    def paper_state(response: Response) -> dict:
+        _mark_deprecated(response)
+        if _paper_authority() == "quant":
+            try:
+                data = quant_paper.state()
+            except QuantPaperUnavailableError as exc:
+                raise HTTPException(status_code=503, detail={"code": "QUANT_UNAVAILABLE", "message": str(exc)}) from exc
+            return {"contract_version": "trading.v1", "authority": "quant", "data": data}
         return {"contract_version": "factor.v1", "data": application.paper_state()}
 
     @app.get("/api/v1/paper/equity")
-    def paper_equity() -> dict:
+    def paper_equity(response: Response) -> dict:
+        _mark_deprecated(response)
+        if _paper_authority() == "quant":
+            try:
+                items = quant_paper.equity()
+            except QuantPaperUnavailableError as exc:
+                raise HTTPException(status_code=503, detail={"code": "QUANT_UNAVAILABLE", "message": str(exc)}) from exc
+            return {"contract_version": "trading.v1", "authority": "quant", "items": items}
         return {"contract_version": "factor.v1", "items": application.paper_equity()}
 
     @app.get("/api/v1/paper/replay")
-    def paper_replay() -> dict:
+    def paper_replay(response: Response) -> dict:
+        _mark_deprecated(response)
+        if _paper_authority() == "quant":
+            try:
+                data = quant_paper.replay()
+            except QuantPaperUnavailableError as exc:
+                raise HTTPException(status_code=503, detail={"code": "QUANT_UNAVAILABLE", "message": str(exc)}) from exc
+            return {"contract_version": "trading.v1", "authority": "quant", "data": data}
         return {"contract_version": "factor.v1", "data": application.paper_replay()}
 
     return app
