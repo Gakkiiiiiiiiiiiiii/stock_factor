@@ -275,6 +275,27 @@ class PostgresCandidateSealStore:
         self._sessions = sessions
 
     def save_freeze(self, freeze: CandidateFreeze) -> None:
+        extra = {
+            key: getattr(freeze, key)
+            for key in (
+                "experiment_id",
+                "discovery_config_hash",
+                "selection_policy_version",
+                "selection_rank",
+                "research_code_version",
+                "selected_at",
+                # P0-4 完整 freeze 证据
+                "factor_code_hash",
+                "universe_snapshot_id",
+                "feature_normalization_version",
+                "selection_config_hash",
+                "discovery_metrics_hash",
+                "candidate_count",
+                "code_sha",
+                "config_hash",
+            )
+            if getattr(freeze, key) is not None
+        }
         with self._sessions.begin() as session:
             row = session.get(FactorCandidateFreezeRow, freeze.candidate_hash)
             if row is None:
@@ -287,6 +308,7 @@ class PostgresCandidateSealStore:
                         discovery_snapshot_id=freeze.discovery_snapshot_id,
                         final_oos_snapshot_id=freeze.final_oos_snapshot_id,
                         candidate_frozen_at=freeze.candidate_frozen_at,
+                        extra=extra,
                     )
                 )
 
@@ -295,6 +317,7 @@ class PostgresCandidateSealStore:
             row = session.get(FactorCandidateFreezeRow, candidate_hash)
             if row is None:
                 return None
+            extra = dict(row.extra or {})
             return CandidateFreeze(
                 candidate_hash=row.candidate_hash,
                 formula=list(row.formula or []),
@@ -303,6 +326,20 @@ class PostgresCandidateSealStore:
                 discovery_snapshot_id=row.discovery_snapshot_id,
                 final_oos_snapshot_id=row.final_oos_snapshot_id,
                 candidate_frozen_at=row.candidate_frozen_at,
+                experiment_id=extra.get("experiment_id"),
+                discovery_config_hash=extra.get("discovery_config_hash"),
+                selection_policy_version=extra.get("selection_policy_version"),
+                selection_rank=extra.get("selection_rank"),
+                research_code_version=extra.get("research_code_version"),
+                selected_at=extra.get("selected_at"),
+                factor_code_hash=extra.get("factor_code_hash"),
+                universe_snapshot_id=extra.get("universe_snapshot_id"),
+                feature_normalization_version=extra.get("feature_normalization_version"),
+                selection_config_hash=extra.get("selection_config_hash"),
+                discovery_metrics_hash=extra.get("discovery_metrics_hash"),
+                candidate_count=extra.get("candidate_count"),
+                code_sha=extra.get("code_sha"),
+                config_hash=extra.get("config_hash"),
             )
 
     def record_evaluation(self, candidate_hash: str, discovery_snapshot_id: str, metrics: dict) -> None:

@@ -6,9 +6,9 @@ import uuid
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from stock_factor.adapters.http.quant_paper_client import QuantPaperClient, QuantPaperUnavailableError
 from stock_factor.api.dependencies import build_application
 from stock_factor.application.service import FactorApplication, MarketDataUnavailableError
-from stock_factor.adapters.http.quant_paper_client import QuantPaperClient, QuantPaperUnavailableError
 
 SERVICE_NAME = "stock_factor"
 SERVICE_VERSION = "1.0.0"

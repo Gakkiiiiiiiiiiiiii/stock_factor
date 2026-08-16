@@ -9,8 +9,8 @@ import numpy as np
 
 from stock_factor.application.final_oos_evaluation import (
     FinalOosAuthorizationError,
-    FinalOosEvaluationService,
     FinalOosDataProvider,
+    FinalOosEvaluationService,
     InMemoryCandidateSealStore,
 )
 from stock_factor.application.finalist_selection import select_finalists
@@ -136,7 +136,7 @@ class FactorMiningService:
         return {
             "recent_rank_ic": metrics.get("rank_ic"),
             "recent_icir": metrics.get("icir"),
-            "recent_topk_excess": metrics.get("topk_excess_annual_return"),
+            "recent_topk_excess": metrics.get("research_excess_return_proxy"),
             "recent_hit_rate": metrics.get("positive_window_ratio"),
             "recent_coverage": metrics.get("coverage"),
             "recent_decay": compute_ic_decay(values[:, start:], close[:, start:], max_horizon=min(5, horizon)),
@@ -435,6 +435,15 @@ class FactorMiningService:
             experiment.transition(FROZEN)
             # §23：FROZEN → OOS_AUTHORIZED 后才允许加载 Final OOS 数据。
             experiment.authorize_oos()
+            # P0-2：授权落库（如配置了持久化授权存储），candidate_set_hash 锁定 finalist 集合。
+            candidate_set_hash = hashlib.sha256(
+                "|".join(sorted(item["candidate"]["candidate_hash"] for item in frozen_items)).encode()
+            ).hexdigest()
+            self._oos_service.register_authorization(
+                experiment.experiment_id,
+                getattr(snapshot, "data_snapshot_id", "") or "",
+                candidate_set_hash,
+            )
             for item in frozen_items:
                 # §22：dataset = warmup + Final OOS 窗口（完整面板），统计只在 OOS 窗口内。
                 values_oos, closes_oos = self._oos_data.load(experiment, (item["values"], panel["close"]))
@@ -494,9 +503,10 @@ class FactorMiningService:
                 data_snapshot_id=snapshot.data_snapshot_id,
             ).model_dump()
             # 收尾文档 §27：Factor 状态不再直接进入 PAPER_TRADING（Paper Authority 属于 Quant）。
+            # 详细修改方案 §10：PAPER_ELIGIBLE 弃用 -> OOS_PASSED（交易执行已迁往 Quant）。
             if is_finalist:
                 if final_oos and final_oos.get("passed") and promotion["passed"]:
-                    status = "PAPER_ELIGIBLE"
+                    status = "OOS_PASSED"
                 elif final_oos and final_oos.get("passed"):
                     status = "DISCOVERY_PASSED"
                 else:
@@ -504,7 +514,7 @@ class FactorMiningService:
             elif discovery_gate["passed"]:
                 status = "DISCOVERY_PASSED"
             else:
-                status = "CANDIDATE"
+                status = "DISCOVERY_CANDIDATE"
             freeze_dict = freeze.to_dict() if isinstance(freeze, CandidateFreeze) else freeze
             metrics = {
                 "in_sample": preliminary,

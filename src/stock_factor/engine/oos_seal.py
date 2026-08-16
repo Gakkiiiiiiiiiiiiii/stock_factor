@@ -60,9 +60,23 @@ class CandidateFreeze:
     selection_rank: int | None = None
     research_code_version: str | None = None
     selected_at: str | None = None
+    # 详细修改方案 P0-4：freeze 内容必须完整回答“为什么这个因子被选中”。
+    factor_code_hash: str | None = None
+    universe_snapshot_id: str | None = None
+    feature_normalization_version: str | None = None
+    selection_config_hash: str | None = None
+    discovery_metrics_hash: str | None = None
+    candidate_count: int | None = None
+    code_sha: str | None = None
+    config_hash: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @property
+    def candidate_rank(self) -> int | None:
+        """P0-4 命名别名：候选排名（selection_rank）。"""
+        return self.selection_rank
 
 
 class CandidateUnfrozenError(RuntimeError):

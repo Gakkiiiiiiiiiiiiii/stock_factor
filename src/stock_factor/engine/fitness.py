@@ -7,6 +7,9 @@ import numpy as np
 TRADING_DAYS_PER_YEAR = 250
 TURNOVER_COST = 0.001
 
+# 详细修改方案 P0-1：本模块产出均为研究代理指标，不是 Quant 权威回测。
+METRIC_SCOPE = "RESEARCH_PROXY"
+
 
 @dataclass(frozen=True)
 class EvaluationThresholds:
@@ -107,13 +110,15 @@ def evaluate_factor_range(
         and excess > thresholds.min_topk_excess_annual_return
     )
     return {
+        "metric_scope": METRIC_SCOPE,
         "rank_ic": round(rank_ic, 4),
         "ic_mean": round(ic_mean, 4),
         "icir": round(icir, 4),
         "coverage": round(coverage, 4),
-        "topk_annual_return": round(annual, 4),
-        "benchmark_annual_return": round(benchmark, 4),
-        "topk_excess_annual_return": round(excess, 4),
+        # P0-1：研究代理收益改名，避免与 Quant backtest.v1 权威指标混淆。
+        "research_topk_return_proxy": round(annual, 4),
+        "research_benchmark_return_proxy": round(benchmark, 4),
+        "research_excess_return_proxy": round(excess, 4),
         "fitness": round(5 * rank_ic + 0.5 * icir + excess, 4),
         "evaluated_days": end - start,
         "valid_ic_days": len(ics),

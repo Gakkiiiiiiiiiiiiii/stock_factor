@@ -10,7 +10,8 @@ class FactorDefinition:
     name: str
     rpn: list[str]
     hypothesis: str = ""
-    status: str = "CANDIDATE"
+    # 详细修改方案 §10：研究治理状态机（PAPER_ELIGIBLE 弃用，执行已迁往 Quant）。
+    status: str = "DISCOVERY_CANDIDATE"
     version: int = 1
     metrics: dict[str, Any] = field(default_factory=dict)
     candidate_hash: str = ""

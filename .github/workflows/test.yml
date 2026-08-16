@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,8 +14,64 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -e ".[test]"
+      # Ruff 强制失败（禁止 || true）
       - run: ruff check src tests
-      - run: pytest --cov=stock_factor --cov-report=term-missing
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[test]" pytest-cov
+      - run: pytest --cov=stock_factor --cov-report=term-missing --ignore=tests/test_integration.py
+
+  research-integrity:
+    # 详细修改方案 §19：研究完整性 Job，失败不允许合并 main
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[test]"
+      - name: Future leak / timestamp cutoff / OOS authorization / one-shot / multiple testing / replay determinism
+        run: >
+          pytest -q tests/test_timestamp_cutoff.py tests/test_final_oos_seal.py
+          tests/test_research_v2_authority.py tests/test_oos_audit.py
+          tests/test_oos_concurrent_consumption.py tests/test_multiple_testing.py
+          tests/test_dsr.py tests/test_pbo.py tests/test_metric_scope.py
+          tests/test_research_dataset_refs.py tests/test_statistical_experiment.py
+          tests/test_fitness_validation.py
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[test]"
+      - name: factor.v1 provider contract + architecture boundaries
+        run: >
+          pytest -q tests/test_alpha_score_contract.py tests/test_api.py
+          tests/test_remote_market_contract.py tests/test_architecture.py
+          tests/test_architecture_boundaries.py tests/test_paper_runtime_authority.py
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[test]"
+      - run: pytest -q tests/test_integration.py
 
   docker-build:
     runs-on: ubuntu-latest

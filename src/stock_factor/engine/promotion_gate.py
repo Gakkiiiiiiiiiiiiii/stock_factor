@@ -95,3 +95,120 @@ def evaluate_promotion_gate(
         },
         reject_reasons=reasons,
     )
+
+
+PROMOTION_GATE_V2_VERSION = "promotion_gate_v3"
+
+# 详细修改方案 §14：八道正式 Gate。
+GATE_ORDER = (
+    "DATA_QUALITY",
+    "DISCOVERY_IC",
+    "STABILITY",
+    "MULTIPLE_TESTING",
+    "FINAL_OOS",
+    "COST_SENSITIVITY",
+    "EXPOSURE_NEUTRALIZATION",
+    "RESEARCH_GOVERNANCE",
+)
+
+
+def evaluate_promotion_gate_v2(
+    *,
+    data_quality: dict | None = None,
+    walkforward: dict | None = None,
+    stability: dict | None = None,
+    statistics: dict | None = None,
+    final_oos: dict | None = None,
+    oos_audit: dict | None = None,
+    cost_sensitivity: dict | None = None,
+    exposure: dict | None = None,
+    neutralization: dict | None = None,
+    governance: dict | None = None,
+    min_window_pass_ratio: float = 0.60,
+    min_sign_consistency: float = 0.55,
+    min_break_even_cost_bps: float = 5.0,
+    max_abs_liquidity_exposure: float = 0.80,
+    min_ic_retained_ratio: float = 0.30,
+) -> dict:
+    """详细修改方案 §14：禁止只返回 boolean，必须给出每道门的完整原因。"""
+    data_quality = data_quality or {}
+    walkforward = walkforward or {}
+    stability = stability or {}
+    statistics = statistics or {}
+    final_oos = final_oos or {}
+    oos_audit = oos_audit or {}
+    cost_sensitivity = cost_sensitivity or {}
+    exposure = exposure or {}
+    neutralization = neutralization or {}
+    governance = governance or {}
+
+    failed_gates: list[dict[str, str]] = []
+
+    def _fail(gate: str, reason: str) -> None:
+        failed_gates.append({"gate": gate, "reason": reason})
+
+    # Gate 1 - Data Quality
+    critical_flags = data_quality.get("critical_flags") or []
+    if not data_quality:
+        _fail("DATA_QUALITY", "data quality report missing")
+    elif critical_flags:
+        _fail("DATA_QUALITY", f"critical quality flags: {', '.join(critical_flags)}")
+
+    # Gate 2 - Discovery IC
+    if not walkforward.get("passed"):
+        _fail("DISCOVERY_IC", "walk-forward discovery gate failed")
+    elif float(walkforward.get("window_pass_ratio", 0.0)) < min_window_pass_ratio:
+        _fail("DISCOVERY_IC", f"window pass ratio < {min_window_pass_ratio}")
+
+    # Gate 3 - Stability
+    if not stability:
+        _fail("STABILITY", "stability report missing")
+    else:
+        consistency = float(stability.get("ic_sign_consistency", 0.0))
+        if consistency < min_sign_consistency:
+            _fail("STABILITY", f"ic sign consistency {consistency} < {min_sign_consistency}")
+        worst = stability.get("worst_regime_ic")
+        if worst is not None and float(worst) <= 0:
+            _fail("STABILITY", f"worst regime ic <= 0 ({worst})")
+
+    # Gate 4 - Multiple Testing
+    if not statistics.get("passed"):
+        _fail("MULTIPLE_TESTING", "FDR adjusted p-value > threshold (or DSR/PBO failed)")
+
+    # Gate 5 - Final OOS
+    if not final_oos.get("passed"):
+        _fail("FINAL_OOS", final_oos.get("reason") or "final oos evaluation failed")
+    if oos_audit.get("audit_status") not in (None, "PASSED"):
+        _fail("FINAL_OOS", f"oos audit status {oos_audit.get('audit_status')}")
+
+    # Gate 6 - Cost Sensitivity
+    if not cost_sensitivity:
+        _fail("COST_SENSITIVITY", "cost sensitivity report missing")
+    elif float(cost_sensitivity.get("break_even_cost_bps", 0.0)) < min_break_even_cost_bps:
+        _fail("COST_SENSITIVITY", f"break-even cost < {min_break_even_cost_bps}bps")
+
+    # Gate 7 - Exposure / Neutralization
+    if not exposure:
+        _fail("EXPOSURE_NEUTRALIZATION", "exposure report missing")
+    else:
+        liquidity = exposure.get("liquidity_exposure")
+        if liquidity is not None and abs(float(liquidity)) > max_abs_liquidity_exposure:
+            _fail("EXPOSURE_NEUTRALIZATION", f"liquidity exposure {liquidity} exceeds limit")
+        retained = neutralization.get("ic_retained_ratio")
+        if retained is not None and float(retained) < min_ic_retained_ratio:
+            _fail("EXPOSURE_NEUTRALIZATION", f"neutralized ic retained ratio {retained} < {min_ic_retained_ratio}")
+
+    # Gate 8 - Research Governance
+    if not governance:
+        _fail("RESEARCH_GOVERNANCE", "governance evidence missing (experiment lineage / freeze required)")
+    else:
+        for required in ("experiment_id", "candidate_freeze"):
+            if not governance.get(required):
+                _fail("RESEARCH_GOVERNANCE", f"{required} missing")
+
+    return {
+        "passed": not failed_gates,
+        "gate_version": PROMOTION_GATE_V2_VERSION,
+        "gates_evaluated": list(GATE_ORDER),
+        "failed_gates": failed_gates,
+    }

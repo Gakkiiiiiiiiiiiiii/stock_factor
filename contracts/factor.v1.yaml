@@ -20,6 +20,7 @@ endpoints:
       factor_set: { type: string, default: production }
     response:
       data:
+        factor_set_id: { type: string, pattern: "fs-<hash16>", description: "详细修改方案 §11 FactorSet 正式身份" }
         factor_set_version: { type: string, pattern: "factor-set-<hash12>", description: "§103 因子集版本" }
         market_snapshot_id: { type: string, description: "quant 市场快照引用（§9）" }
         data_version: string
@@ -29,8 +30,14 @@ endpoints:
           type: array
           items:
             symbol: string
+            alpha_score: number
             score: number
             rank: { type: integer, description: "1 = 最高分" }
+            coverage: { type: number, description: "详细修改方案 §12：因子数据覆盖率" }
+            confidence: { type: number, description: "详细修改方案 §12：置信度（coverage 驱动）" }
+            factor_contributions:
+              type: array
+              items: { factor_id: string, contribution: number }
             evidence:
               type: array
               items: { factor_id: string, contribution: number }
@@ -58,12 +65,40 @@ research_integrity:
   - Experiment 必须分别保存 discovery_snapshot_id / final_oos_snapshot_id（§86）
   - forward return 不得越过评估窗口边界（防未来函数）
 factor_status:
-  # 收尾文档 §27：Mining 不直接进入 PAPER_TRADING（Paper Authority 属于 quant）
-  - CANDIDATE
+  # 详细修改方案 §10：研究治理状态机（PAPER_ELIGIBLE 弃用，交易执行已迁往 Quant）
+  - DRAFT
+  - DISCOVERY_CANDIDATE
   - DISCOVERY_PASSED
+  - FINALIST
+  - OOS_PASSED
   - OOS_FAILED
-  - PAPER_ELIGIBLE
+  - PROMOTED
+  - ACTIVE
+  - DEGRADED
   - RETIRED
+  - INVALIDATED
+metric_scope:
+  # 详细修改方案 P0-1：本服务收益指标均为研究代理，权威回测只来自 quant backtest.v1
+  value: RESEARCH_PROXY
+  forbidden_fields: [backtest_return, strategy_return, portfolio_return]
+research_governance_engines:
+  # 详细修改方案 P1：统计治理引擎
+  - multiple_testing (Bonferroni / Holm / BH-FDR)
+  - sharpe_validation (PSR / DSR)
+  - pbo (CSCV)
+  - bootstrap (moving block / stationary)
+  - neutralization (industry / market_cap / beta / volatility / liquidity)
+  - cost_sensitivity (5/10/20/50bps + break-even)
+  - stability (regime / subperiod / sign consistency)
+promotion_gate_v2:
+  # 详细修改方案 §14：八道门，禁止只返回 boolean
+  gates: [DATA_QUALITY, DISCOVERY_IC, STABILITY, MULTIPLE_TESTING, FINAL_OOS,
+          COST_SENSITIVITY, EXPOSURE_NEUTRALIZATION, RESEARCH_GOVERNANCE]
+  response: { passed: boolean, failed_gates: [{ gate: string, reason: string }] }
+factor_set:
+  # 详细修改方案 §11：Agent 使用 factor_set_id 而非临时查询 active factors
+  identity: [factor_set_id, factor_set_version, factor_ids, factor_versions, weights,
+             research_experiment_ids, promotion_policy_version, valid_from, valid_to, status]
 paper_deprecation:
   # 收尾文档 §26：Paper 端点为兼容 proxy，内部转发 quant trading.v1
   endpoints: [/api/v1/paper/orders/generate, /api/v1/paper/run, /api/v1/paper/state, /api/v1/paper/equity, /api/v1/paper/replay]

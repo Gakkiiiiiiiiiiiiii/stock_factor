@@ -13,6 +13,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from stock_factor.application.oos_authorization import OosAuthorizationError, OosAuthorizationStore
 from stock_factor.engine.fitness import evaluate_factor_range
 from stock_factor.engine.oos_seal import (
     CandidateFreeze,
@@ -23,7 +24,11 @@ from stock_factor.engine.research_split import FactorResearchSplit
 
 
 class FinalOosAuthorizationError(RuntimeError):
-    """收尾文档 §23：实验未处于 OOS_AUTHORIZED 时禁止读取/评估 Final OOS。"""
+    """收尾文档 §23：实验未处于 OOS_AUTHORIZED 时禁止读取/评估 Final OOS。
+
+    详细修改方案 P0-2：数据库级授权异常（缺失/已消费/已失效）会被转为
+    本异常抛出，调用方按同一策略处理。
+    """
 
 
 class FinalOosDataProvider:
@@ -89,13 +94,20 @@ class InMemoryCandidateSealStore:
 class FinalOosEvaluationService:
     """一次性 Final OOS 评估。"""
 
-    def __init__(self, seal_store: CandidateSealStore) -> None:
+    def __init__(self, seal_store: CandidateSealStore, authorizations: OosAuthorizationStore | None = None) -> None:
         self._seal = seal_store
+        self._authorizations = authorizations
 
     def freeze_candidate(self, freeze: CandidateFreeze) -> CandidateFreeze:
         """进入 Final OOS 前冻结候选（§13.3）。"""
         self._seal.save_freeze(freeze)
         return freeze
+
+    def register_authorization(self, experiment_id: str, final_oos_snapshot_id: str = "", candidate_set_hash: str = "") -> dict | None:
+        """P0-2：实验授权 OOS 时同步落库授权记录（无持久化存储时为 no-op）。"""
+        if self._authorizations is None:
+            return None
+        return self._authorizations.authorize(experiment_id, final_oos_snapshot_id, candidate_set_hash)
 
     def evaluate(
         self,
@@ -152,6 +164,12 @@ class FinalOosEvaluationService:
             raise FinalOosAuthorizationError(
                 f"实验 {getattr(experiment, 'experiment_id', '?')} 未授权 Final OOS（当前 {getattr(experiment, 'status', '?')}）"
             )
+        # P0-2：数据库事务级一次性消费；并发下只有一个 worker 能成功。
+        if self._authorizations is not None:
+            try:
+                self._authorizations.consume(getattr(experiment, "experiment_id", ""))
+            except OosAuthorizationError as exc:
+                raise FinalOosAuthorizationError(str(exc)) from exc
         metrics = self.evaluate(candidate_hash, values, closes, split, horizon)
         # cohort（finalist_count > 1）场景下只有首次评估推动状态机。
         if experiment.status == "OOS_AUTHORIZED":

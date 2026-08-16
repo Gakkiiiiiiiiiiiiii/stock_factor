@@ -157,18 +157,36 @@ class FactorApplication:
                     for item in contributions
                     if not np.isnan(item["column"][index])
                 ]
+                # 详细修改方案 §12：coverage/confidence 避免 Agent 把缺数据的股票当高置信 Alpha。
+                coverage = round(len(evidence) / factor_count, 4) if factor_count else 0.0
+                confidence = round(coverage * (1.0 - 1.0 / max(len(ranks), 1)) if score is not None else 0.0, 4)
                 ranked_scores.append(
-                    {"symbol": symbol, "score": score, "rank": ranks.get(index), "evidence": evidence}
+                    {
+                        "symbol": symbol,
+                        "alpha_score": score,
+                        "score": score,
+                        "rank": ranks.get(index),
+                        "coverage": coverage,
+                        "confidence": confidence,
+                        "factor_contributions": evidence,
+                        "evidence": evidence,
+                    }
                 )
         factor_set_version = "factor-set-" + hashlib.sha256(
             "|".join(sorted(str(factor.get("factor_id")) for factor in factors)).encode()
         ).hexdigest()[:12]
+        factor_set_id = "fs-" + hashlib.sha256(
+            "|".join(
+                sorted(f"{factor.get('factor_id')}:{factor.get('version', 1)}" for factor in factors)
+            ).encode()
+        ).hexdigest()[:16]
         return {
             "as_of": snapshot.dates[-1] if snapshot.dates else as_of,
             "factor_count": len(contributions),
             "data_version": snapshot.data_version,
             "data_snapshot_id": snapshot.data_snapshot_id,
             # §14.2 On-demand Alpha Score 契约字段
+            "factor_set_id": factor_set_id,
             "factor_set_version": factor_set_version,
             "market_snapshot_id": snapshot.data_snapshot_id,
             "scores": ranked_scores,

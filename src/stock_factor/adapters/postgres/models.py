@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import JSON, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -145,6 +146,53 @@ class FactorCandidateFreezeRow(Base):
     # SEALED / INVALIDATED（OOS 结果被反馈进搜索后置为 INVALIDATED，§13.4）
     oos_window_status: Mapped[str] = mapped_column(String(20), default="SEALED", index=True)
     oos_invalidation_reason: Mapped[str | None] = mapped_column(String(128))
+    # 详细修改方案 P0-4：完整 freeze 证据（factor_code_hash/discovery_metrics_hash/candidate_count 等）。
+    extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class OosAuthorizationRow(Base):
+    """详细修改方案 P0-2：Final OOS 数据库级一次性授权。
+
+    AUTHORIZED -> CONSUMED 必须在同一事务内完成（SELECT ... FOR UPDATE），
+    保证并发 worker 不可能双重消费。
+    """
+
+    __tablename__ = "oos_authorizations"
+    authorization_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: f"oosa-{uuid4().hex[:12]}")
+    experiment_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    final_oos_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    candidate_set_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="AUTHORIZED", index=True)
+    authorized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FactorSetRow(Base):
+    """详细修改方案 §11/§17：FactorSet 正式版本身份。"""
+
+    __tablename__ = "factor_sets"
+    factor_set_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    factor_set_version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    research_experiment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    promotion_policy_version: Mapped[str] = mapped_column(String(80), default="promotion_gate_v2")
+    valid_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    valid_to: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE", index=True)
+    code_sha: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    config_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FactorSetMemberRow(Base):
+    """详细修改方案 §17：FactorSet 成员（factor + version + weight）。"""
+
+    __tablename__ = "factor_set_members"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    factor_set_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    factor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    factor_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
 
 class FactorFinalOosEvaluationRow(Base):
