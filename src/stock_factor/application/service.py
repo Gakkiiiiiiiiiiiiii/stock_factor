@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import math
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -10,7 +11,7 @@ from stock_factor.application.mining import FactorMiningService
 from stock_factor.application.panel import build_feature_panel
 from stock_factor.application.paper import PaperTradingService
 from stock_factor.domain.factor import FactorJob
-from stock_factor.engine.alpha import compose_alpha_scores
+from stock_factor.engine.alpha import compose_alpha_scores_with_evidence
 from stock_factor.engine.fitness import evaluate_factor
 from stock_factor.engine.vm import StackVM
 from stock_factor.ports.providers import (
@@ -31,6 +32,10 @@ def _json_safe(value):
     return value
 
 
+class MarketDataUnavailableError(RuntimeError):
+    """§90：Quant 市场数据不可用，禁止启动新 Mining。"""
+
+
 class FactorApplication:
     def __init__(
         self,
@@ -44,9 +49,21 @@ class FactorApplication:
         self._jobs, self._factors, self._mining = jobs, factors, mining
         self._market, self._content, self._paper = market, content, paper
 
-    def create_mining_job(self, payload: dict) -> dict:
-        job = FactorJob(job_id=uuid4().hex, request=payload)
+    def create_mining_job(self, payload: dict, idempotency_key: str | None = None) -> dict:
+        # §90：Quant 市场数据不可用时禁止启动新 Mining。
+        symbols = list(payload.get("symbols") or [])
+        if symbols:
+            self._require_market_available(symbols)
+        job = FactorJob(job_id=uuid4().hex, request=payload, idempotency_key=idempotency_key)
         return self._jobs.create(job).to_dict()
+
+    def _require_market_available(self, symbols: list[str]) -> None:
+        end = datetime.now(UTC).date().isoformat()
+        start = (datetime.now(UTC).date() - timedelta(days=10)).isoformat()
+        try:
+            self._market.get_daily_bars(symbols[:1], start, end, "qfq")
+        except Exception as exc:  # noqa: BLE001
+            raise MarketDataUnavailableError(f"DATA_NOT_READY: quant market data unavailable: {exc}") from exc
 
     def get_mining_job(self, job_id: str) -> dict | None:
         job = self._jobs.get(job_id)
@@ -69,8 +86,10 @@ class FactorApplication:
         except Exception as exc:
             current = self._jobs.get(job.job_id)
             stage = current.stage if current else stage
-            self._jobs.fail(job.job_id, stage, f"{type(exc).__name__}: {exc}")
-            return {"job_id": job.job_id, "status": "FAILED", "stage": stage, "error": str(exc)}
+            # §90：数据拉取阶段失败 => 显式标记 DATA_NOT_READY。
+            message = f"DATA_NOT_READY: {type(exc).__name__}: {exc}" if stage == "data" else f"{type(exc).__name__}: {exc}"
+            self._jobs.fail(job.job_id, stage, message)
+            return {"job_id": job.job_id, "status": "FAILED", "stage": stage, "error": message}
 
     def list_factors(self, limit: int) -> list[dict]:
         return self._factors.list_active(limit)
@@ -114,20 +133,46 @@ class FactorApplication:
     def alpha_score(self, symbols: list[str], as_of: str | None) -> dict:
         snapshot, panel = self._panel(symbols, None, as_of)
         factors = self._factors.list_active(100)
-        scores, count = compose_alpha_scores(panel, factors)
-        items = (
-            []
-            if scores is None
-            else [
-                {"symbol": symbol, "score": None if np.isnan(scores[index]) else round(float(scores[index]), 8)}
-                for index, symbol in enumerate(snapshot.symbols)
-            ]
-        )
+        scores, contributions = compose_alpha_scores_with_evidence(panel, factors)
+        items: list[dict] = []
+        ranked_scores: list[dict] = []
+        if scores is not None:
+            order = sorted(
+                (index for index in range(len(snapshot.symbols)) if not np.isnan(scores[index])),
+                key=lambda index: float(scores[index]),
+                reverse=True,
+            )
+            ranks = {index: position + 1 for position, index in enumerate(order)}
+            factor_count = len(contributions)
+            for index, symbol in enumerate(snapshot.symbols):
+                score = None if np.isnan(scores[index]) else round(float(scores[index]), 8)
+                items.append({"symbol": symbol, "score": score})
+                evidence = [
+                    {
+                        "factor_id": item["factor_id"],
+                        "contribution": round(float(item["column"][index]) / factor_count, 8)
+                        if not np.isnan(item["column"][index])
+                        else None,
+                    }
+                    for item in contributions
+                    if not np.isnan(item["column"][index])
+                ]
+                ranked_scores.append(
+                    {"symbol": symbol, "score": score, "rank": ranks.get(index), "evidence": evidence}
+                )
+        factor_set_version = "factor-set-" + hashlib.sha256(
+            "|".join(sorted(str(factor.get("factor_id")) for factor in factors)).encode()
+        ).hexdigest()[:12]
         return {
             "as_of": snapshot.dates[-1] if snapshot.dates else as_of,
-            "factor_count": count,
+            "factor_count": len(contributions),
             "data_version": snapshot.data_version,
             "data_snapshot_id": snapshot.data_snapshot_id,
+            # §14.2 On-demand Alpha Score 契约字段
+            "factor_set_version": factor_set_version,
+            "market_snapshot_id": snapshot.data_snapshot_id,
+            "scores": ranked_scores,
+            # 兼容旧消费方的精简结构
             "items": items,
         }
 

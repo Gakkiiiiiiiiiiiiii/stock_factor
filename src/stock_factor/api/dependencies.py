@@ -3,10 +3,12 @@ from __future__ import annotations
 from stock_factor.adapters.http import HttpContentSignalProvider, HttpMarketDataProvider, HttpModelClient
 from stock_factor.adapters.postgres import Database
 from stock_factor.adapters.postgres.repositories import (
+    PostgresCandidateSealStore,
     PostgresFactorJobRepository,
     PostgresFactorRepository,
     PostgresPaperRepository,
 )
+from stock_factor.application.final_oos_evaluation import FinalOosEvaluationService
 from stock_factor.application.mining import FactorMiningService
 from stock_factor.application.paper import PaperTradingService
 from stock_factor.application.service import FactorApplication
@@ -22,7 +24,9 @@ def build_application(database_url: str | None = None, market=None, content=None
     jobs = PostgresFactorJobRepository(database.session_factory)
     paper_repository = PostgresPaperRepository(database.session_factory)
     model_client = model or HttpModelClient()
-    mining = FactorMiningService(market_provider, content_provider, factors, model_client)
+    # Final OOS 真隔离：独立冻结/评估存储（设计文档 §13/§78）。
+    final_oos_service = FinalOosEvaluationService(PostgresCandidateSealStore(database.session_factory))
+    mining = FactorMiningService(market_provider, content_provider, factors, model_client, final_oos_service=final_oos_service)
     return FactorApplication(
         jobs,
         factors,

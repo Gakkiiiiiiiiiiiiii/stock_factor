@@ -1,0 +1,60 @@
+# factor.v1 Contract（设计文档 §14）
+# Producer: stock_factor   Consumers: stock_agent（FactorSpecialist）
+contract_version: factor.v1
+service: stock_factor
+endpoints:
+  - name: list_factors
+    method: GET
+    path: /api/v1/factors
+  - name: get_factor
+    method: GET
+    path: /api/v1/factors/{factor_id}
+    returns: [formula, status, RankIC, ICIR, OOS, lifecycle, capacity, exposure]
+  - name: alpha_score
+    method: POST
+    path: /api/v1/alpha/score
+    description: On-demand Alpha Score（§14.2）
+    request:
+      symbols: { type: array, items: string, required: true }
+      as_of: { type: date, required: false }
+      factor_set: { type: string, default: production }
+    response:
+      data:
+        factor_set_version: { type: string, pattern: "factor-set-<hash12>", description: "§103 因子集版本" }
+        market_snapshot_id: { type: string, description: "quant 市场快照引用（§9）" }
+        data_version: string
+        data_snapshot_id: string
+        as_of: string
+        scores:
+          type: array
+          items:
+            symbol: string
+            score: number
+            rank: { type: integer, description: "1 = 最高分" }
+            evidence:
+              type: array
+              items: { factor_id: string, contribution: number }
+        items: { type: array, description: "兼容旧消费方的精简结构 {symbol, score}" }
+  - name: create_mining_job
+    method: POST
+    path: /api/v1/mining/jobs
+    idempotency: Idempotency-Key header（§33）
+  - name: evaluate_factor
+    method: POST
+    path: /api/v1/factors/evaluate
+  - name: health_version
+    method: GET
+    path: /health/version
+research_integrity:
+  # §13 / §78 Final OOS 真隔离
+  - Candidate Search 只能访问 Discovery Snapshot
+  - Preliminary Fitness / FDR / PBO / DSR / Recent Alpha 全部不得引用 Final OOS
+  - 进入 Final OOS 前必须生成 Candidate Freeze（candidate_hash/formula/dsl_version/
+    feature_set_version/discovery_snapshot_id/candidate_frozen_at）
+  - FinalOosEvaluationService 独立执行、一次性使用
+  - OOS 结果反馈进入搜索 => OOS 区间立即失效（OOS_WINDOW_INVALIDATED）
+  - Experiment 必须分别保存 discovery_snapshot_id / final_oos_snapshot_id（§86）
+dependencies:
+  allowed: [quant HTTP, stock_content HTTP, Model API, PostgreSQL]
+  forbidden: [stock_agent, quant Python import, stock_content Python import]
+error_codes: [FACTOR_NOT_PROMOTED, DATA_NOT_READY, SNAPSHOT_NOT_FOUND]

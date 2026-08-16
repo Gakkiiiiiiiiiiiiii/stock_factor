@@ -1,0 +1,19 @@
+# market-data.v1 消费者副本（设计文档 §7 / §12 / §76）
+# Producer: quant（唯一事实源）   Consumer: stock_factor
+# 注意：本文件是 quant/contracts/market-data.v1.yaml 的消费方镜像，
+# 修改必须以 quant 仓库中的正本为准（§30 Contract Source of Truth）。
+contract_version: market-data.v1
+service: quant
+consumer: stock_factor
+consumer_configuration:
+  env: MARKET_DATA_SERVICE_URL
+  default: http://quant:8011
+  primary_path: POST /api/v1/market/bars/batch
+  legacy_fallback_path: POST /v1/bars/batch   # 迁移期兼容（§12）
+response_requirements:
+  - contract_version == market-data.v1
+  - data.symbols / data.dates / data.bars / data.data_version / data.data_snapshot_id 必须齐全
+  - data_snapshot_id 内容寻址且不可变（§101）
+consumer_rules:
+  - stock_factor 不复制 Market Bars，只保存 market_snapshot_id（§40）
+  - 内容信号必须按 available_from <= feature_time 连接（§47）

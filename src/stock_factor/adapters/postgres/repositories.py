@@ -8,7 +8,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import sessionmaker
 
 from stock_factor.adapters.postgres.models import (
+    FactorCandidateFreezeRow,
     FactorCandidateRow,
+    FactorFinalOosEvaluationRow,
     FactorFinalOosRow,
     FactorJobRow,
     FactorLifecycleEventRow,
@@ -26,6 +28,7 @@ from stock_factor.adapters.postgres.models import (
     PaperStateRow,
 )
 from stock_factor.domain.factor import FactorDefinition, FactorJob
+from stock_factor.engine.oos_seal import CandidateFreeze
 
 
 class PostgresFactorRepository:
@@ -119,6 +122,8 @@ class PostgresFactorRepository:
                         passed_pbo=bool(statistics.get("passed_pbo")),
                         method=str(statistics.get("method") or "multiple_testing_v1"),
                         data_snapshot_id=(factor.metrics or {}).get("data_snapshot_id"),
+                        discovery_snapshot_id=(factor.metrics or {}).get("discovery_snapshot_id"),
+                        final_oos_snapshot_id=(factor.metrics or {}).get("final_oos_snapshot_id"),
                     )
                 )
                 session.add(
@@ -127,6 +132,8 @@ class PostgresFactorRepository:
                         factor_version=row.version,
                         metrics=final_oos,
                         data_snapshot_id=(factor.metrics or {}).get("data_snapshot_id"),
+                        discovery_snapshot_id=(factor.metrics or {}).get("discovery_snapshot_id"),
+                        final_oos_snapshot_id=(factor.metrics or {}).get("final_oos_snapshot_id"),
                     )
                 )
                 session.add(
@@ -192,6 +199,13 @@ class PostgresFactorJobRepository:
 
     def create(self, job: FactorJob) -> FactorJob:
         with self._sessions.begin() as session:
+            # §33：同一 Idempotency-Key 的重复提交直接返回已有任务。
+            if job.idempotency_key:
+                existing = session.scalar(
+                    select(FactorJobRow).where(FactorJobRow.idempotency_key == job.idempotency_key)
+                )
+                if existing is not None:
+                    return self._domain(existing)
             session.add(FactorJobRow(**job.to_dict()))
         return job
 
@@ -252,6 +266,85 @@ class PostgresFactorJobRepository:
                 row.status = "FAILED" if row.retry_count >= row.max_retries else "PENDING"
                 row.stage, row.error = stage, error[:4000]
                 row.lease_owner = row.lease_expires_at = None
+
+
+class PostgresCandidateSealStore:
+    """Candidate Freeze / Final OOS 评估记录的 PostgreSQL 持久化（§13.3/§13.4）。"""
+
+    def __init__(self, sessions: sessionmaker) -> None:
+        self._sessions = sessions
+
+    def save_freeze(self, freeze: CandidateFreeze) -> None:
+        with self._sessions.begin() as session:
+            row = session.get(FactorCandidateFreezeRow, freeze.candidate_hash)
+            if row is None:
+                session.add(
+                    FactorCandidateFreezeRow(
+                        candidate_hash=freeze.candidate_hash,
+                        formula=list(freeze.formula),
+                        dsl_version=freeze.dsl_version,
+                        feature_set_version=freeze.feature_set_version,
+                        discovery_snapshot_id=freeze.discovery_snapshot_id,
+                        final_oos_snapshot_id=freeze.final_oos_snapshot_id,
+                        candidate_frozen_at=freeze.candidate_frozen_at,
+                    )
+                )
+
+    def get_freeze(self, candidate_hash: str) -> CandidateFreeze | None:
+        with self._sessions() as session:
+            row = session.get(FactorCandidateFreezeRow, candidate_hash)
+            if row is None:
+                return None
+            return CandidateFreeze(
+                candidate_hash=row.candidate_hash,
+                formula=list(row.formula or []),
+                dsl_version=row.dsl_version,
+                feature_set_version=row.feature_set_version,
+                discovery_snapshot_id=row.discovery_snapshot_id,
+                final_oos_snapshot_id=row.final_oos_snapshot_id,
+                candidate_frozen_at=row.candidate_frozen_at,
+            )
+
+    def record_evaluation(self, candidate_hash: str, discovery_snapshot_id: str, metrics: dict) -> None:
+        with self._sessions.begin() as session:
+            if session.scalar(
+                select(FactorFinalOosEvaluationRow).where(
+                    FactorFinalOosEvaluationRow.candidate_hash == candidate_hash,
+                    FactorFinalOosEvaluationRow.discovery_snapshot_id == discovery_snapshot_id,
+                )
+            ):
+                return
+            freeze = session.get(FactorCandidateFreezeRow, candidate_hash)
+            session.add(
+                FactorFinalOosEvaluationRow(
+                    candidate_hash=candidate_hash,
+                    discovery_snapshot_id=discovery_snapshot_id,
+                    final_oos_snapshot_id=freeze.final_oos_snapshot_id if freeze else "",
+                    metrics=metrics,
+                )
+            )
+
+    def get_evaluation(self, candidate_hash: str, discovery_snapshot_id: str) -> dict | None:
+        with self._sessions() as session:
+            row = session.scalar(
+                select(FactorFinalOosEvaluationRow).where(
+                    FactorFinalOosEvaluationRow.candidate_hash == candidate_hash,
+                    FactorFinalOosEvaluationRow.discovery_snapshot_id == discovery_snapshot_id,
+                )
+            )
+            return dict(row.metrics) if row else None
+
+    def invalidate_oos_window(self, candidate_hash: str, reason: str) -> None:
+        with self._sessions.begin() as session:
+            row = session.get(FactorCandidateFreezeRow, candidate_hash)
+            if row is not None:
+                row.oos_window_status = "INVALIDATED"
+                row.oos_invalidation_reason = reason[:120]
+
+    def oos_window_status(self, candidate_hash: str) -> str:
+        with self._sessions() as session:
+            row = session.get(FactorCandidateFreezeRow, candidate_hash)
+            return row.oos_window_status if row else "SEALED"
 
 
 class PostgresPaperRepository:

@@ -30,6 +30,8 @@ class FactorJob:
     request: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    # §33：写接口幂等键，避免重试产生重复挖掘任务
+    idempotency_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

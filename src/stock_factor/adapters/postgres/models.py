@@ -42,6 +42,8 @@ class FactorJobRow(Base):
     error: Mapped[str | None] = mapped_column(Text)
     lease_owner: Mapped[str | None] = mapped_column(String(128))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    # §33 Idempotency-Key：避免重试产生重复挖掘任务
+    idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -111,6 +113,9 @@ class FactorStatisticalTestRow(Base):
     passed_pbo: Mapped[bool] = mapped_column(default=False)
     method: Mapped[str] = mapped_column(String(80), default="multiple_testing_v1")
     data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    # §86：Experiment 快照引用（统计验证只在 Discovery 窗口）
+    discovery_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    final_oos_snapshot_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -121,6 +126,36 @@ class FactorFinalOosRow(Base):
     factor_version: Mapped[int] = mapped_column(Integer)
     metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    discovery_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    final_oos_snapshot_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FactorCandidateFreezeRow(Base):
+    """§13.3 Candidate Freeze：进入 Final OOS 前的不可变冻结记录。"""
+
+    __tablename__ = "factor_candidate_freeze"
+    candidate_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    formula: Mapped[list[str]] = mapped_column(JSON, default=list)
+    dsl_version: Mapped[str] = mapped_column(String(40), default="factor-dsl.v1")
+    feature_set_version: Mapped[str] = mapped_column(String(80), default="")
+    discovery_snapshot_id: Mapped[str] = mapped_column(String(128))
+    final_oos_snapshot_id: Mapped[str] = mapped_column(String(128))
+    candidate_frozen_at: Mapped[str] = mapped_column(String(64))
+    # SEALED / INVALIDATED（OOS 结果被反馈进搜索后置为 INVALIDATED，§13.4）
+    oos_window_status: Mapped[str] = mapped_column(String(20), default="SEALED", index=True)
+    oos_invalidation_reason: Mapped[str | None] = mapped_column(String(128))
+
+
+class FactorFinalOosEvaluationRow(Base):
+    """§13.4 一次性 Final OOS 评估记录。"""
+
+    __tablename__ = "factor_final_oos_evaluation"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    candidate_hash: Mapped[str] = mapped_column(String(64), index=True)
+    discovery_snapshot_id: Mapped[str] = mapped_column(String(128), index=True)
+    final_oos_snapshot_id: Mapped[str] = mapped_column(String(128))
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

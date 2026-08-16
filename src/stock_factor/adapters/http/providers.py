@@ -1,25 +1,41 @@
 from __future__ import annotations
 
 import os
+from uuid import uuid4
 
 import httpx
 
 from stock_factor.domain.market import MarketDataSnapshot
 
 
+def _trace_headers() -> dict[str, str]:
+    # §32：统一 Trace Headers，factor 出站调用透传 trace 与调用方标识。
+    return {"X-Trace-Id": uuid4().hex, "X-Caller-Service": "stock_factor"}
+
+
 class HttpMarketDataProvider:
+    """market-data.v1 消费者。
+
+    事实源已从 stock-agent-market-data 切换为 quant（设计文档 §12/§76）：
+    主路径 POST /api/v1/market/bars/batch，迁移期兼容旧路径 /v1/bars/batch。
+    """
+
     def __init__(self, base_url: str | None = None, timeout: float = 30) -> None:
-        self._url = (base_url or os.getenv("MARKET_DATA_SERVICE_URL", "http://stock-agent-market-data:8012")).rstrip(
+        self._url = (base_url or os.getenv("MARKET_DATA_SERVICE_URL", "http://quant:8011")).rstrip(
             "/"
         )
         self._timeout = timeout
 
     def get_daily_bars(self, symbols: list[str], start: str, end: str, adjust: str = "qfq") -> MarketDataSnapshot:
-        response = httpx.post(
-            f"{self._url}/v1/bars/batch",
-            json={"symbols": symbols, "start": start, "end": end, "adjust": adjust},
-            timeout=self._timeout,
-        )
+        payload = {"symbols": symbols, "start": start, "end": end, "adjust": adjust}
+        response: httpx.Response | None = None
+        try:
+            response = httpx.post(f"{self._url}/api/v1/market/bars/batch", json=payload, headers=_trace_headers(), timeout=self._timeout)
+        except httpx.HTTPError:
+            response = None
+        if response is None or response.status_code == 404:
+            # 迁移期兼容：旧 market-data-service 只提供 /v1/bars/batch（§12）。
+            response = httpx.post(f"{self._url}/v1/bars/batch", json=payload, headers=_trace_headers(), timeout=self._timeout)
         response.raise_for_status()
         body = response.json()
         if body.get("contract_version") not in {None, "market-data.v1"}:
@@ -48,6 +64,7 @@ class HttpContentSignalProvider:
         response = httpx.post(
             f"{self._url}/internal/v1/factor-signals",
             json={"symbols": symbols, "start": start, "end": end, "minimum_support_status": "SOURCE_SUPPORTED"},
+            headers=_trace_headers(),
             timeout=self._timeout,
         )
         response.raise_for_status()
