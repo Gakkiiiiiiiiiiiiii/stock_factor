@@ -48,18 +48,32 @@ $env:PYTHONPATH = "D:\project\stock_factor\src"
 & D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.training.train --config configs\technical_v1.yaml
 ```
 
-`configs/technical_v1_local.yaml` is the verified desktop run used for the
-first checkpoint (64 symbols, 128-day windows, stride 5, CUDA FP16; stage
-epochs 5/8/8/8 with 20 steps per epoch). The
-unbounded `technical_v1.yaml` keeps the full-universe setting for the next
-long run. Snapshot preparation joins quant PIT circulating capital to produce
-`turnover = volume / circulating_capital`, preserves suspension rows with a
-quality mask, and writes the qlib binary provider plus dataset manifest.
+`configs/technical_v1_local.yaml` is an engineering smoke configuration (64
+symbols, 128-day windows, stride 5, CUDA FP16). It uses the V2 feature/label
+schemas, a deterministic 20% instrument holdout, structured masking, gradient
+accumulation, and separate encoder/head learning rates. The unbounded
+`technical_v1.yaml` is the research-scale configuration; the local run must
+not be treated as a reliable model. Snapshot preparation joins quant PIT
+circulating capital to produce `turnover = volume / circulating_capital`,
+preserves missing-turnover calendar rows with observation flags, and writes
+the qlib-compatible provider plus V2 dataset manifest.
 
 Inference on a saved checkpoint:
 
 ```powershell
 & D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.training.inference `
-  --checkpoint artifacts\models\technical_local_v7\tech-v1-20260822T155151Z-wyckoff_phase_events-e008 `
-  --dataset artifacts\datasets\technical_v1_local_v8 --split test --index 0
+  --checkpoint artifacts\models\technical_local_v8\<checkpoint> `
+  --dataset artifacts\datasets\technical_v2_local --split time_test --index 0
+```
+
+After training, a checkpoint is only a candidate. Run the frozen evaluator to
+produce JSON and Markdown evidence; only a checkpoint with a PASS Reliability
+Gate may be promoted to ACTIVE:
+
+```powershell
+& D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.evaluation.run `
+  --checkpoint artifacts\models\technical_local_v8\<checkpoint> `
+  --dataset artifacts\datasets\technical_v2_local `
+  --gold-set artifacts\gold_sets\wyckoff_v1 `
+  --report artifacts\reports\technical\<checkpoint>
 ```

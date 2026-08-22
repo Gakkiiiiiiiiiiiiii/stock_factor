@@ -39,12 +39,11 @@ def prepare(args: argparse.Namespace) -> QuantSnapshot:
         left_on="trading_date", right_on="announce_date", by="symbol", direction="backward",
     )
     bars["turnover"] = bars["volume"].astype(float) / bars["circulating_capital"].astype(float)
+    bars["turnover_observed"] = bars["turnover"].notna().astype(float)
     active_capital_missing = bars["circulating_capital"].isna() & (bars["volume"].astype(float) > 0)
-    excluded_active_missing_turnover = int(active_capital_missing.sum())
-    # A missing PIT float-share fact cannot be replaced by a future value.
-    # Drop only active rows; suspension rows remain as masked tokens with a
-    # zero turnover observation.
-    bars = bars.loc[~active_capital_missing].copy()
+    missing_turnover_rows = int(active_capital_missing.sum())
+    # A missing PIT float-share fact must not compress the trading calendar.
+    # Keep the row, use a neutral placeholder, and expose the observation flag.
     bars["turnover"] = bars["turnover"].fillna(0.0)
     bars = bars.drop(columns=["announce_date", "circulating_capital"])
     if st_path.exists():
@@ -61,7 +60,12 @@ def prepare(args: argparse.Namespace) -> QuantSnapshot:
     bars["is_delisting"] = 0.0
     bars["is_limit_up"] = 0.0
     bars["is_limit_down"] = 0.0
-    bars["state_observed"] = 1.0 if st_path.exists() else 0.0
+    bars["st_observed"] = 1.0 if st_path.exists() else 0.0
+    bars["suspension_observed"] = 1.0
+    bars["limit_observed"] = 0.0
+    bars["delisting_observed"] = 0.0
+    bars["price_observed"] = bars[["open", "high", "low", "close"]].notna().all(axis=1).astype(float)
+    bars["volume_observed"] = bars["volume"].notna().astype(float)
     bars["listing_days"] = bars.groupby("symbol").cumcount() + 1
     suspended = bars["is_suspended"] > 0
     price_present = bars[["open", "high", "low", "close"]].notna().all(axis=1)
@@ -98,7 +102,7 @@ def prepare(args: argparse.Namespace) -> QuantSnapshot:
             "turnover_source": str(capital_path.resolve()),
             "pit_sources": {"st": str(st_path.resolve()), "capital": str(capital_path.resolve())},
             "quality_flags": [],
-            "excluded_active_missing_turnover_rows": excluded_active_missing_turnover,
+            "missing_turnover_rows_kept": missing_turnover_rows,
         },
     )
 

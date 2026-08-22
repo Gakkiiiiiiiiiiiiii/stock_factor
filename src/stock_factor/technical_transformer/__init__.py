@@ -7,4 +7,4 @@ dataset/checkpoint manifests that retain the full lineage.
 
 __all__ = ["__version__"]
 
-__version__ = "technical-transformer.v1"
+__version__ = "technical-transformer.v1-reliability-v2"

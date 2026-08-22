@@ -16,6 +16,15 @@ from .schemas import CONTINUOUS_FEATURES, FEATURE_NAMES, FEATURE_SCHEMA, LABEL_S
 from .snapshot import QuantSnapshot
 
 
+CANONICAL_SPLITS = ("train", "valid", "time_test", "instrument_test", "double_oos")
+TURNOVER_DERIVED_FEATURES = {"turnover", "turnover_ratio_5", "turnover_ratio_20", "turnover_zscore_20"}
+OPTIONAL_ROLLING_FEATURES = {"volume_zscore_20", "volume_zscore_60", *TURNOVER_DERIVED_FEATURES}
+
+
+def canonical_split_name(name: str) -> str:
+    return "time_test" if name == "test" else name
+
+
 @dataclass(frozen=True)
 class SplitConfig:
     train_start: str
@@ -36,11 +45,20 @@ class SplitConfig:
         )
 
     def ranges(self) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
-        return {
+        result = {
             "train": (pd.Timestamp(self.train_start), pd.Timestamp(self.train_end)),
             "valid": (pd.Timestamp(self.valid_start), pd.Timestamp(self.valid_end)),
             "test": (pd.Timestamp(self.test_start), pd.Timestamp(self.test_end)),
         }
+        ordered = list(result.values())
+        for (previous_start, previous_end), (next_start, next_end) in zip(ordered, ordered[1:]):
+            if next_start <= previous_end:
+                raise ValueError("time split ranges overlap")
+            if (next_start - previous_end).days < self.gap_days:
+                raise ValueError(f"time split gap is smaller than gap_days={self.gap_days}")
+            if next_end < next_start or previous_end < previous_start:
+                raise ValueError("time split range has inverted dates")
+        return result
 
 
 @dataclass(frozen=True)
@@ -53,6 +71,9 @@ class DatasetConfig:
     fit_sample_per_symbol: int = 512
     qlib_source_path: str | None = None
     split: SplitConfig | None = None
+    holdout_ratio: float = 0.20
+    symbol_split_seed: int = 42
+    stratify_fields: tuple[str, ...] = ("board", "industry", "market_cap_bucket", "liquidity_bucket")
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> "DatasetConfig":
@@ -65,7 +86,72 @@ class DatasetConfig:
             fit_sample_per_symbol=int(value.get("fit_sample_per_symbol", 512)),
             qlib_source_path=str(value["qlib_source_path"]) if value.get("qlib_source_path") else None,
             split=SplitConfig.from_mapping(split) if split else None,
+            holdout_ratio=float(value.get("holdout_ratio", 0.20)),
+            symbol_split_seed=int(value.get("symbol_split_seed", 42)),
+            stratify_fields=tuple(str(item) for item in value.get("stratify_fields", ("board", "industry", "market_cap_bucket", "liquidity_bucket"))),
         )
+
+
+def deterministic_symbol_split(
+    symbols: list[str] | tuple[str, ...],
+    metadata: pd.DataFrame | None = None,
+    *,
+    holdout_ratio: float = 0.20,
+    seed: int = 42,
+    stratify_fields: tuple[str, ...] = (),
+) -> tuple[list[str], list[str]]:
+    """Return a reproducible, symbol-disjoint train/holdout split.
+
+    If optional point-in-time symbol metadata is available, symbols are
+    allocated within deterministic strata.  Otherwise the same hash ordering
+    is used globally; sorting symbols alone is explicitly avoided.
+    """
+    unique = sorted({str(symbol) for symbol in symbols})
+    if not unique:
+        return [], []
+    ratio = min(max(float(holdout_ratio), 0.0), 0.95)
+    rows: dict[str, tuple[str, ...]] = {}
+    available = set(metadata.columns) if metadata is not None else set()
+    if metadata is not None and "symbol" in available:
+        meta = metadata.drop_duplicates("symbol").set_index("symbol")
+        for symbol in unique:
+            if symbol in meta.index:
+                rows[symbol] = tuple(str(meta.loc[symbol, field]) if field in available and pd.notna(meta.loc[symbol, field]) else "UNKNOWN" for field in stratify_fields)
+    groups: dict[tuple[str, ...], list[str]] = {}
+    for symbol in unique:
+        groups.setdefault(rows.get(symbol, ()), []).append(symbol)
+    holdout: list[str] = []
+    for group_key in sorted(groups, key=repr):
+        group = groups[group_key]
+        desired = int(round(len(group) * ratio))
+        if ratio > 0 and len(group) >= 5:
+            desired = max(1, desired)
+        desired = min(desired, max(0, len(group) - 1))
+        ranked = sorted(group, key=lambda item: hashlib.sha256(f"{seed}:{repr(group_key)}:{item}".encode()).hexdigest())
+        holdout.extend(ranked[:desired])
+    # Small datasets must still have both sides when a non-zero holdout was requested.
+    if ratio > 0 and len(unique) >= 2 and not holdout:
+        holdout.append(min(unique, key=lambda item: hashlib.sha256(f"{seed}:{item}".encode()).hexdigest()))
+    if len(holdout) >= len(unique):
+        holdout = holdout[:-1]
+    holdout_set = set(holdout)
+    return [symbol for symbol in unique if symbol not in holdout_set], [symbol for symbol in unique if symbol in holdout_set]
+
+
+def symbol_hash(symbols: list[str] | tuple[str, ...]) -> str:
+    return hashlib.sha256("|".join(sorted(map(str, symbols))).encode()).hexdigest()
+
+
+def assert_split_disjoint(records: list[dict[str, Any]]) -> None:
+    """Validate no symbol/as-of sample is assigned to two evaluation splits."""
+    seen: dict[tuple[str, str], str] = {}
+    for item in records:
+        key = (str(item["symbol"]), str(item["as_of"]))
+        split = canonical_split_name(str(item["split"]))
+        previous = seen.get(key)
+        if previous is not None and previous != split:
+            raise ValueError(f"sample appears in multiple splits: {key} ({previous}, {split})")
+        seen[key] = split
 
 
 class RobustFeatureProcessor:
@@ -80,11 +166,18 @@ class RobustFeatureProcessor:
         if values.ndim != 2 or values.shape[1] != len(CONTINUOUS_FEATURES):
             raise ValueError("unexpected continuous feature matrix shape")
         clean = np.asarray(values, dtype=np.float64)
-        clean = clean[np.isfinite(clean).all(axis=1)]
-        if len(clean) == 0:
+        if not np.isfinite(clean).any():
             raise ValueError("cannot fit feature processor on empty train data")
-        self.median = np.nanmedian(clean, axis=0)
-        q75, q25 = np.nanpercentile(clean, [75, 25], axis=0)
+        # Fit each channel on the finite observations available in the train
+        # range; a constant/unknown rolling statistic gets a neutral fallback.
+        self.median = np.zeros(clean.shape[1], dtype=np.float64)
+        q75 = np.zeros(clean.shape[1], dtype=np.float64)
+        q25 = np.zeros(clean.shape[1], dtype=np.float64)
+        for index in range(clean.shape[1]):
+            values = clean[np.isfinite(clean[:, index]), index]
+            if len(values):
+                self.median[index] = float(np.median(values))
+                q25[index], q75[index] = np.percentile(values, [25, 75])
         self.scale = (q75 - q25) / 1.349
         self.scale = np.where(np.isfinite(self.scale) & (self.scale > 1e-6), self.scale, 1.0)
         return self
@@ -146,6 +239,44 @@ def _eligible_samples(
                 "quality_ratio": quality_ratio,
             })
             last_position[split_name] = position
+    return samples
+
+
+def _eligible_samples_for_range(
+    dates: pd.Series,
+    listing_days: pd.Series,
+    quality: np.ndarray,
+    config: DatasetConfig,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    split_name: str,
+) -> list[dict[str, Any]]:
+    """Create samples for one explicit range without crossing its start."""
+    positions = [i for i, item in enumerate(dates) if start_date <= item <= end_date]
+    samples: list[dict[str, Any]] = []
+    last_position: int | None = None
+    if not positions:
+        return samples
+    first = positions[0]
+    for position in positions:
+        if position - first < config.step_len - 1:
+            continue
+        window_start = position - config.step_len + 1
+        if dates.iloc[window_start] < start_date:
+            continue
+        if float(listing_days.iloc[position]) < config.min_listing_days:
+            continue
+        quality_ratio = float(np.mean(quality[window_start:position + 1]))
+        if quality_ratio < config.min_quality_ratio:
+            continue
+        if last_position is not None and position - last_position < config.stride:
+            continue
+        samples.append({
+            "end_index": int(position), "start_index": int(window_start),
+            "as_of": dates.iloc[position].date().isoformat(), "split": split_name,
+            "quality_ratio": quality_ratio,
+        })
+        last_position = position
     return samples
 
 
@@ -220,6 +351,8 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
     if output.exists() and (output / "dataset_manifest.json").exists():
         existing = json.loads((output / "dataset_manifest.json").read_text(encoding="utf-8"))
         if existing.get("source_market_snapshot_id") == snapshot.snapshot_id:
+            if existing.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"] or existing.get("label_schema_version") != LABEL_SCHEMA.version:
+                raise RuntimeError(f"dataset directory is sealed with an older schema; choose a new V2 output directory: {output}")
             return existing
         raise RuntimeError(f"dataset directory already sealed for another snapshot: {output}")
     output.mkdir(parents=True, exist_ok=True)
@@ -230,35 +363,51 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
         symbols = symbols[:config.max_symbols]
     frame = frame[frame["symbol"].isin(symbols)].sort_values(["symbol", "trading_date"])
     split = config.split
-    # First pass: fit only on rows inside the training range.  A deterministic
-    # bounded sample prevents loading millions of rows into RAM.
+    metadata_columns = ["symbol", *config.stratify_fields]
+    metadata = frame[[column for column in metadata_columns if column in frame.columns]].drop_duplicates("symbol") if "symbol" in frame else None
+    train_symbols, holdout_symbols = deterministic_symbol_split(
+        symbols, metadata, holdout_ratio=config.holdout_ratio, seed=config.symbol_split_seed,
+        stratify_fields=config.stratify_fields,
+    )
+    holdout_set = set(holdout_symbols)
+
+    # Fit only on train-symbol/train-time rows.  Rows with missing turnover are
+    # allowed into the calendar; their turnover-derived continuous values are
+    # imputed by the train-only processor and flagged in the state channels.
     fit_parts: list[np.ndarray] = []
     all_dates: set[str] = set()
     cached: list[tuple[str, pd.DataFrame, pd.DataFrame, pd.DataFrame]] = []
+    required_features = [name for name in CONTINUOUS_FEATURES if name not in OPTIONAL_ROLLING_FEATURES]
+    train_range = split.ranges().get("train") if split else None
     for symbol, group in frame.groupby("symbol", sort=True):
         group = group.sort_values("trading_date").reset_index(drop=True)
         features = build_features(group)
         labels = build_labels(group)
-        feature_valid = features[CONTINUOUS_FEATURES].notna().all(axis=1).to_numpy()
+        feature_valid = features[required_features].notna().all(axis=1).to_numpy()
         quality = features["quality_mask"].to_numpy(dtype=float) * feature_valid.astype(float)
         features["quality_mask"] = quality
         listing = group["listing_days"] if "listing_days" in group else pd.Series(np.arange(1, len(group) + 1))
-        samples = _eligible_samples(group["trading_date"], listing, quality, config)
-        if split:
-            train_positions = [i for i, item in enumerate(group["trading_date"]) if _split_for_date(item, split) == "train"]
-        else:
-            train_positions = list(range(len(group)))
-        if train_positions:
-            positions = train_positions[::max(1, len(train_positions) // max(config.fit_sample_per_symbol, 1))][:config.fit_sample_per_symbol]
-            fit_parts.append(features.iloc[positions][CONTINUOUS_FEATURES].to_numpy(dtype=np.float32))
+        train_positions = list(range(len(group)))
+        if train_range:
+            train_positions = [i for i, item in enumerate(group["trading_date"]) if train_range[0] <= item <= train_range[1]]
+        if symbol not in holdout_set and train_positions:
+            sample_count = min(len(train_positions), max(config.fit_sample_per_symbol, 1))
+            positions = [train_positions[index] for index in np.linspace(0, len(train_positions) - 1, sample_count, dtype=int)]
+            fit_values = features.iloc[positions][CONTINUOUS_FEATURES].to_numpy(dtype=np.float32)
+            required_indices = [CONTINUOUS_FEATURES.index(name) for name in required_features]
+            finite = np.isfinite(fit_values[:, required_indices]).all(axis=1)
+            if finite.any():
+                fit_parts.append(fit_values[finite])
         cached.append((str(symbol), group, features, labels))
         all_dates.update(group["trading_date"].dt.date.astype(str).tolist())
     if not fit_parts:
         raise ValueError("no train rows available after snapshot/split filtering")
     processor = RobustFeatureProcessor().fit(np.concatenate(fit_parts, axis=0))
     samples_path = output / "samples.jsonl"
-    sample_count: dict[str, int] = {"train": 0, "valid": 0, "test": 0}
+    sample_count: dict[str, int] = {name: 0 for name in CANONICAL_SPLITS}
+    all_records: list[dict[str, Any]] = []
     series_meta: list[dict[str, Any]] = []
+    ranges = split.ranges() if split else {}
     with samples_path.open("w", encoding="utf-8") as sample_file:
         for symbol, group, features, labels in cached:
             transformed = features.copy()
@@ -267,22 +416,48 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
             x = transformed[FEATURE_NAMES].to_numpy(dtype=np.float32)
             y = labels[LABEL_SCHEMA.names].to_numpy(dtype=np.float32)
             quality = transformed["quality_mask"].to_numpy(dtype=np.float32)
-            np.savez_compressed(series_dir / f"{symbol}.npz", dates=group["trading_date"].astype("int64").to_numpy(), features=x, labels=y, quality=quality)
-            samples = _eligible_samples(group["trading_date"], group["listing_days"], quality, config)
-            for item in samples:
-                item = dict(item)
+            np.savez_compressed(
+                series_dir / f"{symbol}.npz", dates=group["trading_date"].astype("int64").to_numpy(),
+                features=x, labels=y, quality=quality,
+            )
+            listing = group["listing_days"] if "listing_days" in group else pd.Series(np.arange(1, len(group) + 1))
+            symbol_records: list[dict[str, Any]] = []
+            if symbol not in holdout_set:
+                base_samples = _eligible_samples(group["trading_date"], listing, quality, config)
+                for item in base_samples:
+                    item = dict(item)
+                    item["split"] = "time_test" if item["split"] == "test" else item["split"]
+                    symbol_records.append(item)
+            elif ranges:
+                if "valid" in ranges:
+                    symbol_records.extend(_eligible_samples_for_range(group["trading_date"], listing, quality, config, *ranges["valid"], "instrument_test"))
+                if "test" in ranges:
+                    symbol_records.extend(_eligible_samples_for_range(group["trading_date"], listing, quality, config, *ranges["test"], "double_oos"))
+            for item in symbol_records:
                 item["symbol"] = symbol
+                all_records.append(item)
                 sample_file.write(json.dumps(item, ensure_ascii=False) + "\n")
-                sample_count[item["split"]] = sample_count.get(item["split"], 0) + 1
-            series_meta.append({"symbol": symbol, "min_date": str(group["trading_date"].min().date()), "max_date": str(group["trading_date"].max().date()), "rows": len(group)})
+                sample_count[item["split"]] += 1
+            series_meta.append({"symbol": symbol, "min_date": str(group["trading_date"].min().date()), "max_date": str(group["trading_date"].max().date()), "rows": len(group), "symbol_role": "holdout" if symbol in holdout_set else "train"})
+    assert_split_disjoint(all_records)
     qlib_provider = output / "qlib_provider"
     _write_qlib_compatible_layout(qlib_provider, series_meta, all_dates)
     native_qlib_version = _dump_native_qlib_provider(qlib_provider, config.qlib_source_path, cached)
+    try:
+        from ..evaluation.leakage import audit_shortcut_leakage
+        audit_parts = []
+        label_parts = []
+        for _symbol, _group, feats, labs in cached:
+            audit_parts.append(feats[FEATURE_NAMES].replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32))
+            label_parts.append(labs[LABEL_SCHEMA.names].to_numpy(dtype=np.float32))
+        leakage_audit = audit_shortcut_leakage(np.concatenate(audit_parts), np.concatenate(label_parts), FEATURE_NAMES, LABEL_SCHEMA.names)
+    except Exception as exc:
+        leakage_audit = {"passed": False, "violations": [{"type": "audit_error", "message": str(exc)}]}
     dataset_manifest = {
-        "schema_version": "technical-dataset.v1", "dataset_id": output.name,
+        "schema_version": "technical-dataset.v2", "dataset_id": output.name,
         "source_market_snapshot_id": snapshot.snapshot_id, "source_data_version": snapshot.manifest.get("data_version"),
         "adjustment": snapshot.manifest.get("adjustment"), "frequency": snapshot.manifest.get("frequency"),
-        "symbols_hash": hashlib.sha256("|".join(symbols).encode()).hexdigest(),
+        "symbols_hash": symbol_hash(symbols),
         "schema_hash": schema_hash({"features": FEATURE_SCHEMA, "labels": LABEL_SCHEMA.as_dict()}),
         "feature_schema_hash": schema_hash(FEATURE_SCHEMA), "label_schema_hash": schema_hash(LABEL_SCHEMA.as_dict()),
         "feature_schema_version": FEATURE_SCHEMA["schema_version"], "label_schema_version": LABEL_SCHEMA.version,
@@ -294,6 +469,13 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
         "samples_path": str(samples_path.resolve()), "series_path": str(series_dir.resolve()),
         "sample_counts": sample_count, "processor": processor.as_dict(),
         "split": config.split.__dict__ if config.split else None,
+        "symbol_split": {
+            "holdout_ratio": config.holdout_ratio, "seed": config.symbol_split_seed,
+            "train_symbols_hash": symbol_hash(train_symbols), "holdout_symbols_hash": symbol_hash(holdout_symbols),
+            "train_symbol_count": len(train_symbols), "holdout_symbol_count": len(holdout_symbols),
+        },
+        "leakage_audit": {"passed": bool(leakage_audit.get("passed")), "violations": leakage_audit.get("violations", [])},
+        "split_overlap": 0,
         "created_at": pd.Timestamp.utcnow().isoformat(),
     }
     (output / "feature_schema.json").write_text(json.dumps(FEATURE_SCHEMA, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -315,9 +497,9 @@ class TSDatasetHAdapter:
     def __init__(self, dataset_dir: str | Path, split: str) -> None:
         self.dataset_dir = Path(dataset_dir)
         self.step_len = 128
-        self.split = split
+        self.split = canonical_split_name(split)
         self.records = [json.loads(line) for line in (self.dataset_dir / "samples.jsonl").read_text(encoding="utf-8").splitlines() if line]
-        self.records = [item for item in self.records if item["split"] == split]
+        self.records = [item for item in self.records if canonical_split_name(str(item["split"])) == self.split]
         self._cache: dict[str, dict[str, np.ndarray]] = {}
 
     def __len__(self) -> int:

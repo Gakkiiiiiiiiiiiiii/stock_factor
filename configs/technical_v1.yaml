@@ -10,13 +10,16 @@ source:
   frequency: 1d
 
 dataset:
-  path: artifacts/datasets/technical_v1
+  path: artifacts/datasets/technical_v2
   step_len: 128
   stride: 5
   min_listing_days: 160
   min_quality_ratio: 0.80
   max_symbols: null
   fit_sample_per_symbol: 512
+  holdout_ratio: 0.20
+  symbol_split_seed: 42
+  stratify_fields: [board, industry, market_cap_bucket, liquidity_bucket]
   qlib_source_path: D:/project/quant/runtime/qlib_source
   split:
     train_start: 2023-01-03
@@ -28,13 +31,13 @@ dataset:
     gap_days: 40
 
 features:
-  schema: technical-feature.v1
-  dimensions: 48
+  schema: technical-feature.v2
+  dimensions: 51
 labels:
-  schema: technical-label.v1
+  schema: technical-label.v2
 
 model:
-  input_dim: 48
+  input_dim: 51
   sequence_length: 128
   hidden_size: 384
   layers: 6
@@ -48,28 +51,40 @@ training:
   precision: fp16
   batch_size: 32
   gradient_accumulation: 2
-  num_workers: 0
+  effective_batch_size: 64
+  num_workers: 4
   weight_decay: 0.01
   grad_clip: 1.0
   run_stages: [masked_pretraining, ma_bollinger, wyckoff_primitives, wyckoff_phase_events]
 
 stages:
   - name: masked_pretraining
-    epochs: 5
-    lr: 0.0003
+    epochs: 6
+    encoder_lr: 0.0003
+    head_lr: 0.0003
+    mask_mode: mixed
+    patience: 3
     max_steps_per_epoch: null
   - name: ma_bollinger
-    epochs: 8
-    lr: 0.0001
+    epochs: 10
+    encoder_lr: 0.0001
+    head_lr: 0.0001
+    active_heads: [ma, bollinger]
+    patience: 3
     max_steps_per_epoch: null
   - name: wyckoff_primitives
-    epochs: 8
-    lr: 0.00005
+    epochs: 10
+    encoder_lr: 0.00005
+    head_lr: 0.0001
+    active_heads: [ma, bollinger, wyckoff_primitives]
+    patience: 3
     max_steps_per_epoch: null
   - name: wyckoff_phase_events
-    epochs: 8
+    epochs: 10
     encoder_lr: 0.00002
-    lr: 0.0001
+    head_lr: 0.0001
+    active_heads: [ma, bollinger, wyckoff_primitives, phase, events]
+    patience: 3
     max_steps_per_epoch: null
 
 hardware:
@@ -78,4 +93,4 @@ hardware:
   ram_gb: 32
 
 checkpoint:
-  root: artifacts/models/technical
+  root: artifacts/models/technical_v2

@@ -15,13 +15,16 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from ..data.dataset import DatasetConfig, TechnicalWindowDataset, build_dataset
-from ..data.schemas import FEATURE_NAMES, FEATURE_SCHEMA, LABEL_SCHEMA
+from ..data.schemas import FEATURE_NAMES, FEATURE_SCHEMA, LABEL_SCHEMA, MASK_RECONSTRUCTION_FEATURES
 from ..data.snapshot import QuantSnapshot
 from ..model.encoder import TechnicalTransformer
 from ..model.heads import TechnicalHeads
-from ..model.losses import compute_loss, compute_mask_loss
+from ..model.losses import compute_loss, compute_mask_loss, event_pos_weight
+from .masking import apply_mask
+from .optimizer import TrainingStage, build_optimizer, optimizer_group_lrs
 
-MASK_TARGET_FEATURES = ["ret_1", "intraday_range_prev_close", "volume_ratio_20", "turnover", "atr14_close", "realized_vol_20"]
+
+MASK_TARGET_FEATURES = MASK_RECONSTRUCTION_FEATURES
 
 
 class TechnicalTransformerSystem(nn.Module):
@@ -36,8 +39,14 @@ class TechnicalTransformerSystem(nn.Module):
         )
         self.heads = TechnicalHeads(hidden_size=self.encoder.hidden_size)
 
-    def forward(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
-        encoded = self.encoder(x)
+    def forward(
+        self,
+        x: torch.Tensor,
+        *,
+        padding_mask: torch.Tensor | None = None,
+        mask_positions: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        encoded = self.encoder(x, padding_mask=padding_mask, mask_positions=mask_positions)
         encoded.update(self.heads(encoded["cls_hidden"]))
         return encoded
 
@@ -74,14 +83,30 @@ def _load_dataset(config: dict[str, Any], snapshot: QuantSnapshot) -> dict[str, 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("source_market_snapshot_id") != snapshot.snapshot_id:
         raise RuntimeError("dataset snapshot identity does not match training snapshot_id")
+    if manifest.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"] or manifest.get("label_schema_version") != LABEL_SCHEMA.version:
+        raise RuntimeError("dataset schema is not Technical Transformer V2; rebuild the dataset before training")
     return manifest
 
 
-def _stage_config(config: dict[str, Any], name: str) -> dict[str, Any]:
+def _stage_config(config: dict[str, Any], name: str) -> TrainingStage:
     for item in config.get("stages", []):
         if item.get("name") == name:
-            return item
+            return TrainingStage.from_mapping(item, default_lr=float(config.get("training", {}).get("lr", 1e-4)))
     raise ValueError(f"stage not found: {name}")
+
+
+def _validation_composite(metrics: dict[str, float]) -> float:
+    """Return a bounded, group-balanced validation score, never total loss."""
+    groups = {
+        "ma": metrics.get("ma_score", metrics.get("ma_direction_accuracy", 0.0)),
+        "bollinger": metrics.get("bollinger_score", 0.0),
+        "wyckoff_primitives": metrics.get("wyckoff_primitive_score", 0.0),
+        "phase": metrics.get("phase_score", 0.0),
+        "events": metrics.get("event_score", 0.0),
+    }
+    weights = {"ma": 0.20, "bollinger": 0.20, "wyckoff_primitives": 0.25, "phase": 0.15, "events": 0.20}
+    active = [name for name, value in groups.items() if value is not None]
+    return float(sum(weights[name] * float(groups[name]) for name in active))
 
 
 def _save_checkpoint(
@@ -91,10 +116,14 @@ def _save_checkpoint(
     snapshot: QuantSnapshot,
     dataset_manifest: dict[str, Any],
     metrics: dict[str, Any],
-    stage: str,
+    stage: TrainingStage,
     epoch: int,
+    *,
+    optimizer_steps: int,
+    best_valid: bool,
+    optimizer: torch.optim.Optimizer,
 ) -> Path:
-    checkpoint_id = f"tech-v1-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{stage}-e{epoch:03d}"
+    checkpoint_id = f"tech-v1-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{stage.name}-e{epoch:03d}"
     directory = output_dir / checkpoint_id
     directory.mkdir(parents=True, exist_ok=True)
     state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
@@ -103,27 +132,48 @@ def _save_checkpoint(
         save_file(state, str(directory / "model.safetensors"))
     except ImportError:
         torch.save(state, directory / "model.pt")
+    training_config = dict(config)
+    training_config.setdefault("training", {})["effective_batch_size"] = int(config.get("training", {}).get("batch_size", 32)) * int(config.get("training", {}).get("gradient_accumulation", 1))
+    training_config["training"]["optimizer_steps"] = int(optimizer_steps)
+    training_config["training"]["optimizer_group_lrs"] = optimizer_group_lrs(optimizer)
     (directory / "model_config.json").write_text(json.dumps(config.get("model", {}), indent=2), encoding="utf-8")
-    (directory / "training_config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    (directory / "training_config.json").write_text(json.dumps(training_config, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     (directory / "feature_schema.json").write_text(json.dumps(FEATURE_SCHEMA, ensure_ascii=False, indent=2), encoding="utf-8")
     (directory / "label_schema.json").write_text(json.dumps(LABEL_SCHEMA.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
     (directory / "dataset_manifest.json").write_text(json.dumps(dataset_manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     (directory / "quant_snapshot_manifest.json").write_text(json.dumps(snapshot.manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     (directory / "validation_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     identity = {
-        "checkpoint_id": checkpoint_id, "model_version": "technical-transformer.v1", "stage": stage, "epoch": epoch,
+        "manifest_version": "technical-checkpoint.v2", "checkpoint_id": checkpoint_id, "model_version": "technical-transformer.v1-reliability-v2",
+        "checkpoint_status": "CANDIDATE", "stage": stage.name, "epoch": epoch, "best_valid": best_valid,
         "git_commit": _git_commit(), "dataset_id": dataset_manifest.get("dataset_id"),
         "market_snapshot_id": snapshot.snapshot_id, "seed": config.get("training", {}).get("seed", 42),
         "feature_schema_hash": dataset_manifest.get("feature_schema_hash"), "label_schema_hash": dataset_manifest.get("label_schema_hash"),
         "torch_version": torch.__version__, "cuda_version": torch.version.cuda,
-        "device": "cuda" if torch.cuda.is_available() else "cpu", "created_at": datetime.now(timezone.utc).isoformat(),
+        "device": next(model.parameters()).device.type, "created_at": datetime.now(timezone.utc).isoformat(),
+        "training": {
+            "batch_size": int(config.get("training", {}).get("batch_size", 32)),
+            "gradient_accumulation": int(config.get("training", {}).get("gradient_accumulation", 1)),
+            "effective_batch_size": int(config.get("training", {}).get("batch_size", 32)) * int(config.get("training", {}).get("gradient_accumulation", 1)),
+            "optimizer_steps": int(optimizer_steps), "optimizer_group_lrs": optimizer_group_lrs(optimizer),
+        },
+        "validation": {"report_id": f"{checkpoint_id}:valid", "best_valid": best_valid},
+        "test": {"executed": False}, "reliability_gate": {"status": "NOT_EVALUATED"},
     }
     (directory / "checkpoint_manifest.json").write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8")
     return directory
 
 
 @torch.no_grad()
-def _evaluate(model: TechnicalTransformerSystem, loader: DataLoader, device: torch.device, stage: str, max_batches: int | None = None) -> dict[str, float]:
+def _evaluate(
+    model: TechnicalTransformerSystem,
+    loader: DataLoader,
+    device: torch.device,
+    stage: TrainingStage,
+    *,
+    seed: int,
+    max_batches: int | None = None,
+) -> dict[str, float]:
     model.eval()
     sums: dict[str, float] = {}
     count = 0
@@ -133,19 +183,19 @@ def _evaluate(model: TechnicalTransformerSystem, loader: DataLoader, device: tor
         if max_batches is not None and batch_index >= max_batches:
             break
         x, y = x.to(device), y.to(device)
-        output = model(x)
-        if stage == "masked_pretraining":
-            mask = torch.zeros((x.shape[0], x.shape[1]), dtype=torch.bool, device=device)
-            mask[:, ::7] = True
-            target = x[:, :, [FEATURE_NAMES.index(name) for name in MASK_TARGET_FEATURES]]
-            loss = compute_mask_loss(output["mask_prediction"], target, mask)
-            items = {"mask": float(loss.detach().cpu())}
+        if stage.name == "masked_pretraining":
+            masked = apply_mask(x, mode=stage.mask_mode or "mixed", seed=seed + batch_index)
+            output = model(masked.input, mask_positions=masked.positions)
+            target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
+            loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
+            items = {"mask": float(loss.cpu())}
         else:
-            loss, items = compute_loss(output, y, stage=stage)
+            output = model(x)
+            loss, items = compute_loss(output, y, stage=stage.name, active_heads=stage.active_heads or None)
         sums["loss"] = sums.get("loss", 0.0) + float(loss.cpu())
         for name, value in items.items():
             sums[name] = sums.get(name, 0.0) + value
-        if stage != "masked_pretraining":
+        if stage.name != "masked_pretraining":
             predicted = output["ma"][:, :6].sign()
             actual = y[:, :6].sign()
             direction_hits += int((predicted == actual).sum().cpu())
@@ -154,16 +204,23 @@ def _evaluate(model: TechnicalTransformerSystem, loader: DataLoader, device: tor
     result = {name: value / max(count, 1) for name, value in sums.items()}
     if direction_total:
         result["ma_direction_accuracy"] = direction_hits / direction_total
+        result["ma_score"] = result["ma_direction_accuracy"]
+    result["validation_composite"] = _validation_composite(result)
     return result
+
+
+def _event_weights(dataset: TechnicalWindowDataset, device: torch.device) -> torch.Tensor | None:
+    if len(dataset) == 0:
+        return None
+    values = np.stack([dataset[index][1][LABEL_SCHEMA.slices["events"]] for index in range(len(dataset))])
+    return event_pos_weight(torch.from_numpy(values).to(device))
 
 
 def train(config: dict[str, Any]) -> Path:
     seed = int(config.get("training", {}).get("seed", 42))
     seed_everything(seed)
     snapshot_cfg = config.get("source", {})
-    snapshot_root = Path(snapshot_cfg["snapshot_root"])
-    snapshot_id = str(snapshot_cfg["market_snapshot_id"])
-    snapshot = QuantSnapshot.load(snapshot_root, snapshot_id, require_qfq=True)
+    snapshot = QuantSnapshot.load(Path(snapshot_cfg["snapshot_root"]), str(snapshot_cfg["market_snapshot_id"]), require_qfq=True)
     snapshot.verify()
     dataset_manifest = _load_dataset(config, snapshot)
     dataset_dir = Path(config["dataset"]["path"])
@@ -172,6 +229,7 @@ def train(config: dict[str, Any]) -> Path:
     train_dataset = TechnicalWindowDataset(dataset_dir, "train")
     valid_dataset = TechnicalWindowDataset(dataset_dir, "valid")
     batch_size = int(config.get("training", {}).get("batch_size", 32))
+    accumulation = max(1, int(config.get("training", {}).get("gradient_accumulation", 1)))
     num_workers = int(config.get("training", {}).get("num_workers", 0))
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=device.type == "cuda", collate_fn=_collate)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=device.type == "cuda", collate_fn=_collate)
@@ -179,53 +237,79 @@ def train(config: dict[str, Any]) -> Path:
     output_root.mkdir(parents=True, exist_ok=True)
     stages = config.get("training", {}).get("run_stages") or [item["name"] for item in config.get("stages", [])]
     last_checkpoint: Path | None = None
-    for stage in stages:
-        stage_cfg = _stage_config(config, stage)
-        epochs = int(stage_cfg.get("epochs", 1))
-        lr = float(stage_cfg.get("lr", config.get("training", {}).get("lr", 1e-4)))
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=float(config.get("training", {}).get("weight_decay", 0.01)))
+    event_weight = _event_weights(train_dataset, device)
+    for stage_name in stages:
+        stage = _stage_config(config, stage_name)
+        optimizer = build_optimizer(model, stage, float(config.get("training", {}).get("weight_decay", 0.01)))
         scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
-        for epoch in range(1, epochs + 1):
+        best_score = float("-inf")
+        best_state: dict[str, torch.Tensor] | None = None
+        best_checkpoint: Path | None = None
+        stale_epochs = 0
+        optimizer_steps = 0
+        for epoch in range(1, stage.epochs + 1):
             model.train()
             running = 0.0
             seen = 0
-            max_steps = stage_cfg.get("max_steps_per_epoch")
+            optimizer.zero_grad(set_to_none=True)
+            configured_max_steps = next(item.get("max_steps_per_epoch") for item in config.get("stages", []) if item.get("name") == stage.name)
+            limit = min(len(train_loader), int(configured_max_steps)) if configured_max_steps is not None else len(train_loader)
             for step, (x, y, _) in enumerate(train_loader):
-                if max_steps is not None and step >= int(max_steps):
+                if step >= limit:
                     break
                 x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-                optimizer.zero_grad(set_to_none=True)
-                if stage == "masked_pretraining":
-                    generator = torch.Generator(device=device).manual_seed(seed + epoch * 100000 + step)
-                    mask = torch.rand((x.shape[0], x.shape[1]), generator=generator, device=device) < 0.15
-                    mask_targets = x[:, :, [FEATURE_NAMES.index(name) for name in MASK_TARGET_FEATURES]].detach().clone()
-                    mask_features = x.clone()
-                    mask_features[:, :, [FEATURE_NAMES.index(name) for name in MASK_TARGET_FEATURES]] = torch.where(mask.unsqueeze(-1), torch.zeros_like(mask_targets), mask_targets)
-                    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
-                        output = model(mask_features)
-                        loss = compute_mask_loss(output["mask_prediction"], mask_targets, mask)
-                        items = {"mask": float(loss.detach().cpu())}
-                else:
-                    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
+                    if stage.name == "masked_pretraining":
+                        masked = apply_mask(x, mode=stage.mask_mode or "mixed", seed=seed + epoch * 100000 + step)
+                        output = model(masked.input, mask_positions=masked.positions)
+                        target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
+                        raw_loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
+                        items = {"mask": float(raw_loss.detach().cpu())}
+                    else:
                         output = model(x)
-                        loss, items = compute_loss(output, y, stage=stage)
+                        raw_loss, items = compute_loss(output, y, stage=stage.name, active_heads=stage.active_heads or None, event_weight=event_weight)
+                    loss = raw_loss / accumulation
                 scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.get("training", {}).get("grad_clip", 1.0)))
-                scaler.step(optimizer)
-                scaler.update()
-                running += float(loss.detach().cpu())
+                running += float(raw_loss.detach().cpu())
                 seen += 1
-            metrics = {"stage": stage, "epoch": epoch, "train_loss": running / max(seen, 1), "valid": _evaluate(model, valid_loader, device, stage, max_batches=stage_cfg.get("eval_max_batches"))}
-            last_checkpoint = _save_checkpoint(model, output_root, config, snapshot, dataset_manifest, metrics, stage, epoch)
-            print(json.dumps({"checkpoint": str(last_checkpoint), **metrics}, ensure_ascii=False), flush=True)
+                is_last = step + 1 == limit
+                if (step + 1) % accumulation == 0 or is_last:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.get("training", {}).get("grad_clip", 1.0)))
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+                    optimizer_steps += 1
+            validation = _evaluate(model, valid_loader, device, stage, seed=seed + epoch * 1000, max_batches=next((item.get("eval_max_batches") for item in config.get("stages", []) if item.get("name") == stage.name), None))
+            metrics = {"stage": stage.name, "epoch": epoch, "train_loss": running / max(seen, 1), "valid": validation}
+            score = float(validation.get("validation_composite", -validation.get("loss", float("inf"))))
+            improved = score > best_score + 1e-8
+            if improved:
+                best_score = score
+                stale_epochs = 0
+                best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+            else:
+                stale_epochs += 1
+            checkpoint = _save_checkpoint(
+                model, output_root, config, snapshot, dataset_manifest, metrics, stage, epoch,
+                optimizer_steps=optimizer_steps, best_valid=improved, optimizer=optimizer,
+            )
+            if improved:
+                best_checkpoint = checkpoint
+            print(json.dumps({"checkpoint": str(checkpoint), **metrics, "optimizer_steps": optimizer_steps}, ensure_ascii=False), flush=True)
+            if stale_epochs >= stage.patience:
+                break
+        if best_state is None or best_checkpoint is None:
+            raise RuntimeError(f"stage {stage.name} produced no validation checkpoint")
+        model.load_state_dict(best_state)
+        last_checkpoint = best_checkpoint
     if last_checkpoint is None:
         raise RuntimeError("no training stage executed")
     return last_checkpoint
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train Technical Transformer V1")
+    parser = argparse.ArgumentParser(description="Train Technical Transformer V1 reliability candidate")
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")) or {}

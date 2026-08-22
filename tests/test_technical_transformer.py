@@ -10,7 +10,7 @@ pd = pytest.importorskip("pandas")
 from stock_factor.technical_transformer.data.dataset import DatasetConfig, RobustFeatureProcessor, SplitConfig, _eligible_samples  # noqa: E402
 from stock_factor.technical_transformer.data.features import build_features  # noqa: E402
 from stock_factor.technical_transformer.data.labels import build_labels  # noqa: E402
-from stock_factor.technical_transformer.data.schemas import ALL_LABELS, FEATURE_NAMES, LABEL_SCHEMA  # noqa: E402
+from stock_factor.technical_transformer.data.schemas import ALL_LABELS, CONTINUOUS_FEATURES, FEATURE_NAMES, LABEL_SCHEMA  # noqa: E402
 
 
 def _bars(rows: int = 320) -> pd.DataFrame:
@@ -27,8 +27,11 @@ def _bars(rows: int = 320) -> pd.DataFrame:
 
 
 def test_feature_and_label_schemas_are_versioned_and_unique() -> None:
-    assert len(FEATURE_NAMES) == 48
-    assert len(ALL_LABELS) == 56
+    assert len(CONTINUOUS_FEATURES) == 36
+    assert len(FEATURE_NAMES) == 51
+    assert len(ALL_LABELS) == 61
+    assert "close_sma20" not in FEATURE_NAMES
+    assert LABEL_SCHEMA.version == "technical-label.v2"
     assert len(set(ALL_LABELS)) == len(ALL_LABELS)
     assert len(LABEL_SCHEMA.names) == len(set(LABEL_SCHEMA.names))
 
@@ -61,9 +64,9 @@ def test_split_window_does_not_cross_segment_start() -> None:
 
 
 def test_processor_fit_scope_is_explicit() -> None:
-    processor = RobustFeatureProcessor().fit(np.ones((20, 39), dtype=np.float32))
+    processor = RobustFeatureProcessor().fit(np.ones((20, len(CONTINUOUS_FEATURES)), dtype=np.float32))
     assert processor.as_dict()["fit_scope"] == "train"
-    assert processor.transform(np.zeros((2, 39), dtype=np.float32)).shape == (2, 39)
+    assert processor.transform(np.zeros((2, len(CONTINUOUS_FEATURES)), dtype=np.float32)).shape == (2, len(CONTINUOUS_FEATURES))
 
 
 def test_features_keep_suspension_quality_mask() -> None:

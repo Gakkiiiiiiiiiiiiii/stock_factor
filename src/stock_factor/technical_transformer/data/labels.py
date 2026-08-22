@@ -19,6 +19,7 @@ def _sigmoid(series: pd.Series, scale: float = 1.0) -> pd.Series:
 
 
 def _days_since(event: pd.Series) -> pd.Series:
+    """Return normalized elapsed trading days since the last signed event."""
     days: list[float] = []
     since = 999.0
     for value in event.fillna(0).astype(bool):
@@ -41,7 +42,7 @@ def build_labels(frame: pd.DataFrame) -> pd.DataFrame:
     close = data["close"].astype(float)
     high, low, open_ = [data[name].astype(float) for name in ("high", "low", "open")]
     volume, amount, turnover = [data[name].astype(float) for name in ("volume", "amount", "turnover")]
-    returns = close.pct_change().fillna(0.0)
+    returns = close.pct_change(fill_method=None).fillna(0.0)
     tr = pd.concat([(high - low).abs(), (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
     atr14 = tr.rolling(14, min_periods=1).mean().replace(0, np.nan)
     ma = {window: close.rolling(window, min_periods=window).mean() for window in (5, 10, 20, 30, 60, 120)}
@@ -57,12 +58,23 @@ def build_labels(frame: pd.DataFrame) -> pd.DataFrame:
     compression = normalized.std(axis=1, ddof=0)
     result["compression_score"] = _clip01(1.0 - compression / 0.08)
     result["ma_expansion_score"] = _clip01(compression / 0.08)
-    cross_5_20 = ((ma[5] > ma[20]) & (ma[5].shift(1) <= ma[20].shift(1))).astype(float)
-    cross_10_20 = ((ma[10] > ma[20]) & (ma[10].shift(1) <= ma[20].shift(1))).astype(float)
-    cross_20_60 = ((ma[20] > ma[60]) & (ma[20].shift(1) <= ma[60].shift(1))).astype(float)
-    result["cross_5_20"], result["cross_10_20"], result["cross_20_60"] = cross_5_20, cross_10_20, cross_20_60
-    result["days_since_cross_5_20"] = _days_since((cross_5_20 > 0) | (cross_5_20.shift(1) < 0))
-    result["days_since_cross_20_60"] = _days_since((cross_20_60 > 0) | (cross_20_60.shift(1) < 0))
+    def signed_cross(short: int, long: int) -> tuple[pd.Series, pd.Series]:
+        previous = ma[short].shift(1) - ma[long].shift(1)
+        current = ma[short] - ma[long]
+        bull = ((current > 0) & (previous <= 0)).astype(float)
+        bear = ((current < 0) & (previous >= 0)).astype(float)
+        return bull, bear
+
+    bull_5_20, bear_5_20 = signed_cross(5, 20)
+    bull_10_20, bear_10_20 = signed_cross(10, 20)
+    bull_20_60, bear_20_60 = signed_cross(20, 60)
+    result["bull_cross_5_20"], result["bear_cross_5_20"] = bull_5_20, bear_5_20
+    result["bull_cross_10_20"], result["bear_cross_10_20"] = bull_10_20, bear_10_20
+    result["bull_cross_20_60"], result["bear_cross_20_60"] = bull_20_60, bear_20_60
+    result["days_since_bull_cross_5_20"] = _days_since(bull_5_20 > 0)
+    result["days_since_bear_cross_5_20"] = _days_since(bear_5_20 > 0)
+    result["days_since_bull_cross_20_60"] = _days_since(bull_20_60 > 0)
+    result["days_since_bear_cross_20_60"] = _days_since(bear_20_60 > 0)
 
     mid = close.rolling(20, min_periods=20).mean()
     std = close.rolling(20, min_periods=20).std(ddof=0)
@@ -125,3 +137,15 @@ def build_labels(frame: pd.DataFrame) -> pd.DataFrame:
     result["sow_score"] = _clip01(result["breakdown_strength"] * 0.45 + result["supply_pressure_proxy"] * 0.35 + result["volume_expansion"] * 0.2)
     result = result[ALL_LABELS].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return result
+
+
+def assert_label_causality(frame: pd.DataFrame, cutoff: int) -> None:
+    """Raise if changing rows after ``cutoff`` changes earlier labels."""
+    from pandas.testing import assert_frame_equal
+
+    baseline = build_labels(frame).iloc[:cutoff].reset_index(drop=True)
+    changed = frame.copy()
+    future_columns = [column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed]
+    changed.loc[cutoff:, future_columns] = changed.loc[cutoff:, future_columns].astype(float) * 1000.0
+    altered = build_labels(changed).iloc[:cutoff].reset_index(drop=True)
+    assert_frame_equal(baseline, altered, check_exact=False, rtol=1e-6, atol=1e-6)

@@ -41,7 +41,7 @@ def predict(model: TechnicalTransformerSystem, window: np.ndarray, device: str |
     phase = torch.softmax(phase_logits, dim=-1).cpu().numpy().tolist()
     events = torch.sigmoid(output["events"][0]).cpu().numpy().tolist()
     return {
-        "model_version": "technical-transformer.v1",
+        "model_version": "technical-transformer.v1-reliability-v2",
         "technical_embedding": output["technical_embedding"][0].cpu().numpy().round(8).tolist(),
         "moving_average": dict(zip(LABEL_SCHEMA.ma, ma)),
         "bollinger": dict(zip(LABEL_SCHEMA.bollinger, boll)),
@@ -57,7 +57,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run Technical Transformer V1 inference on one dataset window")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--dataset", required=True)
-    parser.add_argument("--split", default="test", choices=["train", "valid", "test"])
+    parser.add_argument("--split", default="time_test", choices=["train", "valid", "test", "time_test", "instrument_test", "double_oos"])
     parser.add_argument("--index", type=int, default=0)
     args = parser.parse_args()
     dataset = TechnicalWindowDataset(args.dataset, args.split)

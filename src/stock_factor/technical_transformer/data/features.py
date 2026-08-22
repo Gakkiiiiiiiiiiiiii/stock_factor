@@ -19,24 +19,37 @@ def _rolling_zscore(series: pd.Series, window: int) -> pd.Series:
     return (series - mean) / (std + EPS)
 
 
-def build_features(frame: pd.DataFrame) -> pd.DataFrame:
-    """Build causal raw/normalized technical inputs for one symbol.
+def _observed(data: pd.DataFrame, column: str, default: float = 0.0) -> pd.Series:
+    if column not in data:
+        return pd.Series(default, index=data.index, dtype=float)
+    return data[column].notna().astype(float)
 
-    Every rolling operation is right-aligned.  No feature reads a row after
-    the current as-of date.
+
+def _observed_flag(data: pd.DataFrame, value_column: str, flag_column: str, default: float = 0.0) -> pd.Series:
+    if flag_column in data:
+        return data[flag_column].astype(float).fillna(0.0)
+    return _observed(data, value_column, default)
+
+
+def build_features(frame: pd.DataFrame) -> pd.DataFrame:
+    """Build causal V2 inputs for one symbol.
+
+    All rolling operations are right aligned.  Missing turnover is retained as
+    a calendar row and represented by a placeholder plus ``turnover_observed``;
+    it is never silently replaced by a future PIT capital observation.
     """
     data = frame.sort_values("trading_date").copy()
     close = data["close"].astype(float)
     prev_close = close.shift(1)
-    high, low, open_, volume, amount, turnover = [data[name].astype(float) for name in ("high", "low", "open", "volume", "amount", "turnover")]
+    high, low, open_, volume, amount = [data[name].astype(float) for name in ("high", "low", "open", "volume", "amount")]
+    turnover = data["turnover"].astype(float) if "turnover" in data else pd.Series(np.nan, index=data.index)
+    turnover_value = turnover.fillna(0.0)
     day_range = (high - low).clip(lower=0)
     body = (close - open_).abs()
     log_volume = np.log1p(volume.clip(lower=0))
     returns = close.pct_change(fill_method=None)
     tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
     atr14 = tr.rolling(14, min_periods=14).mean()
-    sma20, sma60 = close.rolling(20, min_periods=20).mean(), close.rolling(60, min_periods=60).mean()
-    ema20 = close.ewm(span=20, adjust=False, min_periods=20).mean()
 
     result = pd.DataFrame(index=data.index)
     result["ret_1"] = returns
@@ -63,39 +76,64 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     result["volume_change_5"] = volume.pct_change(5, fill_method=None)
     result["amount_ratio_5"] = _safe_ratio(amount, amount.rolling(5, min_periods=5).mean())
     result["amount_ratio_20"] = _safe_ratio(amount, amount.rolling(20, min_periods=20).mean())
-    result["turnover"] = turnover
-    result["turnover_ratio_5"] = _safe_ratio(turnover, turnover.rolling(5, min_periods=5).mean())
-    result["turnover_ratio_20"] = _safe_ratio(turnover, turnover.rolling(20, min_periods=20).mean())
-    result["turnover_zscore_20"] = _rolling_zscore(turnover, 20)
+    result["turnover"] = turnover_value
+    result["turnover_ratio_5"] = _safe_ratio(turnover_value, turnover_value.rolling(5, min_periods=5).mean())
+    result["turnover_ratio_20"] = _safe_ratio(turnover_value, turnover_value.rolling(20, min_periods=20).mean())
+    result["turnover_zscore_20"] = _rolling_zscore(turnover_value, 20)
     result["true_range_close"] = _safe_ratio(tr, close)
     result["atr14_close"] = _safe_ratio(atr14, close)
     result["realized_vol_5"] = returns.rolling(5, min_periods=5).std(ddof=0)
     result["realized_vol_20"] = returns.rolling(20, min_periods=20).std(ddof=0)
     result["realized_vol_60"] = returns.rolling(60, min_periods=60).std(ddof=0)
     result["range_atr14"] = _safe_ratio(day_range, atr14)
-    result["close_sma20"] = _safe_ratio(close, sma20) - 1
-    result["close_sma60"] = _safe_ratio(close, sma60) - 1
-    result["close_ema20"] = _safe_ratio(close, ema20) - 1
 
-    for column in STATE_FEATURES:
-        if column in data:
-            result[column] = data[column].astype(float)
-        else:
-            result[column] = 0.0
+    # Observed flags are separate from the state value.  A zero can therefore
+    # mean a real false value, while a missing observation remains identifiable.
+    price_observed = data[["open", "high", "low", "close"]].notna().all(axis=1).astype(float)
+    volume_observed = _observed(data, "volume")
+    turnover_observed = _observed_flag(data, "turnover", "turnover_observed")
+    result["is_suspended"] = data["is_suspended"].astype(float) if "is_suspended" in data else ((volume <= 0) | (price_observed == 0)).astype(float)
+    result["is_st"] = data["is_st"].astype(float) if "is_st" in data else 0.0
+    result["is_star_st"] = data["is_star_st"].astype(float) if "is_star_st" in data else 0.0
+    result["is_delisting"] = data["is_delisting"].astype(float) if "is_delisting" in data else 0.0
+    result["is_limit_up"] = data["is_limit_up"].astype(float) if "is_limit_up" in data else 0.0
+    result["is_limit_down"] = data["is_limit_down"].astype(float) if "is_limit_down" in data else 0.0
+    result["st_observed"] = _observed_flag(data, "is_st", "st_observed")
+    result["suspension_observed"] = _observed_flag(data, "is_suspended", "suspension_observed")
+    result["limit_observed"] = _observed_flag(data, "is_limit_up", "limit_observed")
+    result["delisting_observed"] = _observed_flag(data, "is_delisting", "delisting_observed")
+    result["turnover_observed"] = turnover_observed
+    result["price_observed"] = _observed_flag(data, "close", "price_observed", 1.0) * price_observed
+    result["volume_observed"] = _observed_flag(data, "volume", "volume_observed", 1.0) * volume_observed
     if "listing_days" in data:
         result["listing_days_norm"] = (data["listing_days"].astype(float) / 252.0).clip(0, 20)
     else:
         result["listing_days_norm"] = np.nan
-    if "quality_mask" not in data:
-        valid = data[["open", "high", "low", "close", "volume", "amount", "turnover"]].notna().all(axis=1)
-        valid &= high >= pd.concat([open_, close], axis=1).max(axis=1)
-        valid &= low <= pd.concat([open_, close], axis=1).min(axis=1)
-        valid &= high >= low
-        result["quality_mask"] = valid.astype(float)
 
-    result = result[FEATURE_NAMES]
-    result = result.replace([np.inf, -np.inf], np.nan)
-    # Warm-up NaNs are expected and are made explicit to the dataset mask.
+    # Quality covers the price/volume calendar row.  Turnover is a separate
+    # group mask so missing PIT capital does not delete an otherwise valid day.
+    valid = price_observed.astype(bool) & volume_observed.astype(bool)
+    valid &= ((high >= pd.concat([open_, close], axis=1).max(axis=1)) | ~price_observed.astype(bool))
+    valid &= ((low <= pd.concat([open_, close], axis=1).min(axis=1)) | ~price_observed.astype(bool))
+    valid &= ((high >= low) | ~price_observed.astype(bool))
+    result["quality_mask"] = valid.astype(float)
+    if "quality_mask" in data:
+        result["quality_mask"] = data["quality_mask"].astype(float).fillna(result["quality_mask"])
+
+    result = result[FEATURE_NAMES].replace([np.inf, -np.inf], np.nan)
     result["quality_mask"] = result["quality_mask"].fillna(0.0)
-    result["state_observed"] = result["state_observed"].fillna(0.0)
+    for column in STATE_FEATURES:
+        result[column] = result[column].fillna(0.0)
     return result
+
+
+def assert_feature_causality(frame: pd.DataFrame, cutoff: int) -> None:
+    """Raise if changing rows after ``cutoff`` changes earlier features."""
+    from pandas.testing import assert_frame_equal
+
+    baseline = build_features(frame).iloc[:cutoff].reset_index(drop=True)
+    changed = frame.copy()
+    future_columns = [column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed]
+    changed.loc[cutoff:, future_columns] = changed.loc[cutoff:, future_columns].astype(float) * 1000.0
+    altered = build_features(changed).iloc[:cutoff].reset_index(drop=True)
+    assert_frame_equal(baseline, altered, check_exact=False, rtol=1e-6, atol=1e-6)

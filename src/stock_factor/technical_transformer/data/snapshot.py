@@ -17,7 +17,9 @@ class SnapshotError(RuntimeError):
 BAR_COLUMNS = ["open", "high", "low", "close", "volume", "amount", "turnover"]
 PIT_COLUMNS = [
     "is_suspended", "is_st", "is_star_st", "is_delisting", "listing_days",
-    "is_limit_up", "is_limit_down", "state_observed",
+    "is_limit_up", "is_limit_down", "st_observed", "suspension_observed",
+    "limit_observed", "delisting_observed", "turnover_observed",
+    "price_observed", "volume_observed",
 ]
 
 

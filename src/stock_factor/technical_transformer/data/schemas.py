@@ -6,10 +6,12 @@ import json
 from typing import Any
 
 
-FEATURE_SCHEMA_VERSION = "technical-feature.v1"
-LABEL_SCHEMA_VERSION = "technical-label.v1"
+FEATURE_SCHEMA_VERSION = "technical-feature.v2"
+LABEL_SCHEMA_VERSION = "technical-label.v2"
 
 
+# These three features are algebraically equivalent to MA targets and are
+# intentionally excluded from V2 to remove the shortcut path.
 CONTINUOUS_FEATURES = [
     "ret_1", "ret_3", "ret_5", "ret_10",
     "open_prev_close", "high_prev_close", "low_prev_close", "close_prev_close",
@@ -20,12 +22,14 @@ CONTINUOUS_FEATURES = [
     "amount_ratio_5", "amount_ratio_20", "turnover", "turnover_ratio_5",
     "turnover_ratio_20", "turnover_zscore_20", "true_range_close", "atr14_close",
     "realized_vol_5", "realized_vol_20", "realized_vol_60", "range_atr14",
-    "close_sma20", "close_sma60", "close_ema20",
 ]
 
 STATE_FEATURES = [
-    "is_suspended", "is_st", "is_star_st", "is_delisting", "listing_days_norm",
-    "is_limit_up", "is_limit_down", "quality_mask", "state_observed",
+    "is_suspended", "is_st", "is_star_st", "is_delisting",
+    "is_limit_up", "is_limit_down",
+    "st_observed", "suspension_observed", "limit_observed", "delisting_observed",
+    "turnover_observed", "price_observed", "volume_observed",
+    "listing_days_norm", "quality_mask",
 ]
 
 FEATURE_NAMES = CONTINUOUS_FEATURES + STATE_FEATURES
@@ -34,8 +38,11 @@ MA_LABELS = [
     "ma5_slope", "ma10_slope", "ma20_slope", "ma30_slope", "ma60_slope", "ma120_slope",
     "close_ma5_distance", "close_ma20_distance", "close_ma60_distance", "close_ma120_distance",
     "bull_alignment_score", "bear_alignment_score", "ma_trend_strength",
-    "compression_score", "ma_expansion_score", "cross_5_20", "cross_10_20", "cross_20_60",
-    "days_since_cross_5_20", "days_since_cross_20_60",
+    "compression_score", "ma_expansion_score",
+    "bull_cross_5_20", "bear_cross_5_20", "bull_cross_10_20", "bear_cross_10_20",
+    "bull_cross_20_60", "bear_cross_20_60",
+    "days_since_bull_cross_5_20", "days_since_bear_cross_5_20",
+    "days_since_bull_cross_20_60", "days_since_bear_cross_20_60",
 ]
 
 BOLL_LABELS = [
@@ -53,8 +60,32 @@ WYCKOFF_PRIMITIVE_LABELS = [
 
 PHASE_LABELS = ["accumulation_like", "markup", "distribution_like", "markdown", "transition"]
 EVENT_LABELS = ["sc_score", "bc_score", "spring_score", "upthrust_score", "sos_score", "sow_score"]
-
 ALL_LABELS = MA_LABELS + BOLL_LABELS + WYCKOFF_PRIMITIVE_LABELS + PHASE_LABELS + EVENT_LABELS
+
+MASK_RECONSTRUCTION_FEATURES = [
+    "ret_1", "intraday_range_prev_close", "intraday_body_prev_close", "range_position",
+    "log1p_volume", "volume_ratio_20", "turnover", "amount_ratio_20", "atr14_close",
+    "realized_vol_20",
+]
+
+FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
+    "PRICE": (
+        "ret_1", "ret_3", "ret_5", "ret_10", "open_prev_close", "high_prev_close",
+        "low_prev_close", "close_prev_close", "intraday_range_prev_close",
+        "intraday_body_prev_close", "body_ratio", "upper_shadow_ratio", "lower_shadow_ratio",
+        "range_position", "gap_ratio",
+    ),
+    "VOLUME": (
+        "log1p_volume", "volume_ratio_5", "volume_ratio_10", "volume_ratio_20", "volume_ratio_60",
+        "volume_zscore_20", "volume_zscore_60", "volume_change_1", "volume_change_5",
+        "amount_ratio_5", "amount_ratio_20", "turnover", "turnover_ratio_5",
+        "turnover_ratio_20", "turnover_zscore_20",
+    ),
+    "VOLATILITY": (
+        "true_range_close", "atr14_close", "realized_vol_5", "realized_vol_20",
+        "realized_vol_60", "range_atr14",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -75,21 +106,25 @@ class LabelSchema:
         start = 0
         result: dict[str, slice] = {}
         for name, values in (
-            ("ma", self.ma),
-            ("bollinger", self.bollinger),
+            ("ma", self.ma), ("bollinger", self.bollinger),
             ("wyckoff_primitives", self.wyckoff_primitives),
-            ("phase", self.phase),
-            ("events", self.events),
+            ("phase", self.phase), ("events", self.events),
         ):
             result[name] = slice(start, start + len(values))
             start += len(values)
         return result
 
     def as_dict(self) -> dict[str, Any]:
-        return {"schema_version": self.version, "groups": {name: list(values) for name, values in (
-            ("ma", self.ma), ("bollinger", self.bollinger),
-            ("wyckoff_primitives", self.wyckoff_primitives), ("phase", self.phase), ("events", self.events),
-        )}}
+        return {
+            "schema_version": self.version,
+            "groups": {
+                name: list(values) for name, values in (
+                    ("ma", self.ma), ("bollinger", self.bollinger),
+                    ("wyckoff_primitives", self.wyckoff_primitives),
+                    ("phase", self.phase), ("events", self.events),
+                )
+            },
+        }
 
 
 LABEL_SCHEMA = LabelSchema()
@@ -105,5 +140,7 @@ FEATURE_SCHEMA = {
     "dimensions": len(FEATURE_NAMES),
     "continuous_features": CONTINUOUS_FEATURES,
     "state_features": STATE_FEATURES,
-    "normalization": {"continuous": "train_only_robust_clip", "state": "none", "mask": "none"},
+    "feature_groups": {name: list(values) for name, values in FEATURE_GROUPS.items()},
+    "mask_reconstruction_features": MASK_RECONSTRUCTION_FEATURES,
+    "normalization": {"continuous": "train_only_robust_clip", "state": "none", "mask": "learned_embedding"},
 }
