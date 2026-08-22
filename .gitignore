@@ -6,3 +6,12 @@ __pycache__/
 *.db
 *.egg-info/
 data/
+
+# The technical transformer has a tracked Python package named `data`.
+!src/stock_factor/technical_transformer/data/
+!src/stock_factor/technical_transformer/data/**
+src/stock_factor/technical_transformer/data/**/__pycache__/
+
+# Generated datasets, checkpoints, and local test workspaces.
+/artifacts/
+/.pytest-tech-*/

@@ -35,3 +35,31 @@ docker compose up --build
 
 The API listens on `http://localhost:8200`; `stock-factor-worker` runs as a
 separate process. Production should apply SQL in `migrations/` before startup.
+
+## Technical Transformer V1
+
+The V1 training pipeline lives under `src/stock_factor/technical_transformer`.
+It consumes only a verified, immutable quant snapshot; it does not read a
+mutable `latest.parquet` directly.
+
+```powershell
+$env:PYTHONPATH = "D:\project\stock_factor\src"
+& D:\project\quant\.venv\Scripts\python.exe scripts\prepare_technical_snapshot.py --quant-root D:\project\quant
+& D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.training.train --config configs\technical_v1.yaml
+```
+
+`configs/technical_v1_local.yaml` is the verified desktop run used for the
+first checkpoint (64 symbols, 128-day windows, stride 5, CUDA FP16; stage
+epochs 5/8/8/8 with 20 steps per epoch). The
+unbounded `technical_v1.yaml` keeps the full-universe setting for the next
+long run. Snapshot preparation joins quant PIT circulating capital to produce
+`turnover = volume / circulating_capital`, preserves suspension rows with a
+quality mask, and writes the qlib binary provider plus dataset manifest.
+
+Inference on a saved checkpoint:
+
+```powershell
+& D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.training.inference `
+  --checkpoint artifacts\models\technical_local_v7\tech-v1-20260822T155151Z-wyckoff_phase_events-e008 `
+  --dataset artifacts\datasets\technical_v1_local_v8 --split test --index 0
+```

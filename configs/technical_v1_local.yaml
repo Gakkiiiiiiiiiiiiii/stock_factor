@@ -1,0 +1,56 @@
+# Reproducible local RTX 4060 Ti run.  The production config keeps the full
+# historical universe; this bounded run creates the first verified checkpoint
+# without loading millions of windows into one desktop training session.
+project:
+  name: technical-transformer-v1-local
+source:
+  authority: quant
+  contract: market-data.v1
+  snapshot_root: D:/project/quant/data/market_snapshots
+  market_snapshot_id: mds-aab5b6aa65b074bba889df04edacb7f7ce7801159140ed8273e3b51207b41e78
+  adjustment: qfq
+  frequency: 1d
+dataset:
+  path: artifacts/datasets/technical_v1_local_v8
+  step_len: 128
+  stride: 5
+  min_listing_days: 160
+  min_quality_ratio: 0.80
+  max_symbols: 64
+  fit_sample_per_symbol: 512
+  qlib_source_path: D:/project/quant/runtime/qlib_source
+  split:
+    train_start: 2023-01-03
+    train_end: 2024-06-28
+    valid_start: 2024-09-02
+    valid_end: 2025-03-31
+    test_start: 2025-06-02
+    test_end: 2026-03-25
+    gap_days: 40
+features: {schema: technical-feature.v1, dimensions: 48}
+labels: {schema: technical-label.v1}
+model:
+  input_dim: 48
+  sequence_length: 128
+  hidden_size: 384
+  layers: 6
+  heads: 8
+  ffn_size: 1536
+  dropout: 0.10
+  embedding_dim: 256
+training:
+  seed: 42
+  precision: fp16
+  batch_size: 32
+  gradient_accumulation: 2
+  num_workers: 0
+  weight_decay: 0.01
+  grad_clip: 1.0
+  run_stages: [masked_pretraining, ma_bollinger, wyckoff_primitives, wyckoff_phase_events]
+stages:
+  - {name: masked_pretraining, epochs: 5, lr: 0.0003, max_steps_per_epoch: 20, eval_max_batches: 4}
+  - {name: ma_bollinger, epochs: 8, lr: 0.0001, max_steps_per_epoch: 20, eval_max_batches: 4}
+  - {name: wyckoff_primitives, epochs: 8, lr: 0.00005, max_steps_per_epoch: 20, eval_max_batches: 4}
+  - {name: wyckoff_phase_events, epochs: 8, lr: 0.0001, encoder_lr: 0.00002, max_steps_per_epoch: 20, eval_max_batches: 4}
+hardware: {device: auto, gpu: RTX_4060_Ti_8GB, ram_gb: 32}
+checkpoint: {root: artifacts/models/technical_local_v7}
