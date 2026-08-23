@@ -87,11 +87,15 @@ def apply_mask(
         if feature_validity.shape != x.shape:
             raise ValueError("feature_validity must have shape [batch, sequence, features]")
         feature_validity = feature_validity.to(device=x.device, dtype=torch.bool)
+    # Mask sampling uses a CPU generator for deterministic cross-device masks;
+    # apply device tensors only after the sampling pass.
+    valid_days_cpu = valid_days.detach().cpu() if valid_days is not None else None
+    feature_validity_cpu = feature_validity.detach().cpu() if feature_validity is not None else None
     masked_input = x.detach().clone()
     positions = torch.zeros((x.shape[0], x.shape[1], x.shape[2]), dtype=torch.bool)
     groups = torch.full((x.shape[0], x.shape[1], x.shape[2]), fill_value=-1, dtype=torch.int64)
     if mode in {"none", "off"}:
-        return MaskedBatch(masked_input, target, positions, groups)
+        return MaskedBatch(masked_input, target, positions.to(x.device), groups.to(x.device))
     if mode not in {"mixed", "day", "group", "span"}:
         raise ValueError(f"unknown mask mode: {mode}")
     generator = torch.Generator(device="cpu").manual_seed(int(seed))
@@ -101,11 +105,18 @@ def apply_mask(
             selected = "day" if draw < 0.50 else ("group" if draw < 0.80 else "span")
         else:
             selected = mode
-            _one_mask(positions, groups, batch_index, mode=selected, generator=generator, valid_days=valid_days)
+        _one_mask(
+            positions,
+            groups,
+            batch_index,
+            mode=selected,
+            generator=generator,
+            valid_days=valid_days_cpu,
+        )
     if valid_days is not None:
-        positions &= valid_days.unsqueeze(-1)
+        positions &= valid_days_cpu.unsqueeze(-1)
     if feature_validity is not None:
-        positions &= feature_validity
+        positions &= feature_validity_cpu
     positions = positions.to(x.device)
     groups = groups.to(x.device)
     # Zero is only the transport value.  The encoder receives positions and

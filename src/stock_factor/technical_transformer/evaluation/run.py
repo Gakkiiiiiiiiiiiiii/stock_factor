@@ -17,10 +17,10 @@ from ..training.inference import load_checkpoint
 from .ablation import occlude_feature_group
 from .baseline_runner import run_baseline_runner
 from .causality import run_causality_suite
-from .embedding_probe import nearest_neighbor_audit, run_embedding_probe
+from .embedding_probe import run_embedding_probe, weak_phase_neighbor_hit
 from .evaluator import evaluate_all_splits
 from .gold_evaluator import evaluate_gold_set
-from .invariance import model_embedding_invariance, model_event_probability_delta, transform_price_scale
+from .invariance import add_small_ohlc_noise, model_embedding_invariance, model_event_probability_delta, model_phase_js_divergence, transform_price_scale
 from .reliability_gate import load_gate_config
 from .report import build_reliability_report, write_reliability_report
 
@@ -43,14 +43,14 @@ def _collect_embeddings(model: torch.nn.Module, dataset: TechnicalWindowDataset,
     return {"embedding": np.asarray(embeddings), "targets": np.asarray(targets), "valid": np.asarray(valid), "raw": np.asarray(raw)}
 
 
-def _embedding_evidence(model: torch.nn.Module, dataset_dir: Path, device: torch.device) -> dict[str, Any]:
+def _embedding_evidence(model: torch.nn.Module, dataset_dir: Path, device: torch.device, *, gold: dict[str, Any] | None = None) -> dict[str, Any]:
     train = _collect_embeddings(model, TechnicalWindowDataset(dataset_dir, "train"), device)
     if len(train["embedding"]) == 0:
         return {"status": "NOT_EVALUATED", "reason": "EMPTY_TRAIN"}
     task_columns = {
         "ma_alignment": "bull_alignment_score", "trend_direction": "trend_direction",
         "boll_squeeze": "squeeze_score", "trading_range": "trading_range_score",
-        "gold_spring": "spring_score", "gold_upthrust": "upthrust_score",
+        "weak_spring": "spring_score", "weak_upthrust": "upthrust_score",
     }
     train_targets = {task: train["targets"][:, LABEL_SCHEMA.names.index(name)] for task, name in task_columns.items()}
     train_targets["phase"] = train["targets"][:, LABEL_SCHEMA.slices["phase"]]
@@ -72,59 +72,85 @@ def _embedding_evidence(model: torch.nn.Module, dataset_dir: Path, device: torch
             train_valid=train_valid, test_valid=test_valid,
             train_raw_features=train["raw"], test_raw_features=test["raw"],
         )
-        nearest = nearest_neighbor_audit(test["embedding"], labels=np.argmax(test_targets["phase"], axis=1), k=min(20, max(1, len(test["embedding"]) - 1)))
-        split_results[split] = {"status": "EVALUATED", **probe, **nearest}
+        split_results[split] = {
+            "status": "EVALUATED", **probe,
+            "weak_phase_neighbor_hit": weak_phase_neighbor_hit(
+                test["embedding"], test_targets["phase"], k=min(20, max(1, len(test["embedding"]) - 1)),
+            ),
+        }
     primary = split_results.get("double_oos", {"status": "NOT_EVALUATED"})
-    return {"status": "EVALUATED", "splits": split_results, **primary}
+    result = {"status": "EVALUATED", "splits": split_results, **primary}
+    result["gold_neighbor_semantic_hit"] = (gold or {}).get("gold_neighbor_semantic_hit")
+    return result
 
 
-def _invariance_evidence(model: torch.nn.Module, dataset_dir: Path, device: torch.device, *, limit: int = 64) -> dict[str, Any]:
+def _invariance_evidence(
+    model: torch.nn.Module,
+    dataset_dir: Path,
+    device: torch.device,
+    *,
+    mode: str = "PRODUCTION",
+    limit: int = 64,
+    raw_noise_scale: float = 0.0005,
+) -> dict[str, Any]:
     dataset = TechnicalWindowDataset(dataset_dir, "double_oos")
     if not len(dataset):
         return {"status": "NOT_EVALUATED", "reason": "EMPTY_DOUBLE_OOS"}
     manifest = json.loads((dataset_dir / "dataset_manifest.json").read_text(encoding="utf-8"))
     source_path = manifest.get("source_market_snapshot_path")
+    if not source_path or not Path(source_path).exists():
+        return {
+            "status": "WARNING" if str(mode).upper() == "RESEARCH" else "NOT_EVALUATED",
+            "passed": False, "reason": "RAW_SNAPSHOT_NOT_AVAILABLE",
+        }
+    source = pd.read_parquet(source_path)
+    processor_data = manifest.get("processor") or json.loads((dataset_dir / "processor.json").read_text(encoding="utf-8"))
+    processor = RobustFeatureProcessor()
+    processor.median = np.asarray(processor_data["median"], dtype=float)
+    processor.scale = np.asarray(processor_data["scale"], dtype=float)
+    processor.clip = float(processor_data.get("clip", 8.0))
+
+    def make_window(frame: pd.DataFrame) -> np.ndarray:
+        features = build_features(frame.sort_values("trading_date"))
+        transformed = features.copy()
+        transformed[CONTINUOUS_FEATURES] = processor.transform(features[CONTINUOUS_FEATURES].to_numpy(dtype=np.float32))
+        transformed[FEATURE_NAMES] = transformed[FEATURE_NAMES].fillna(0.0)
+        return transformed[FEATURE_NAMES].tail(128).to_numpy(dtype=np.float32)
+
     original_windows: list[np.ndarray] = []
     scaled_windows: list[np.ndarray] = []
-    if source_path and Path(source_path).exists():
-        source = pd.read_parquet(source_path)
-        processor_data = manifest.get("processor") or json.loads((dataset_dir / "processor.json").read_text(encoding="utf-8"))
-        processor = RobustFeatureProcessor()
-        processor.median = np.asarray(processor_data["median"], dtype=float)
-        processor.scale = np.asarray(processor_data["scale"], dtype=float)
-        processor.clip = float(processor_data.get("clip", 8.0))
-
-        def make_window(frame: pd.DataFrame) -> np.ndarray:
-            features = build_features(frame.sort_values("trading_date"))
-            transformed = features.copy()
-            transformed[CONTINUOUS_FEATURES] = processor.transform(features[CONTINUOUS_FEATURES].to_numpy(dtype=np.float32))
-            transformed[FEATURE_NAMES] = transformed[FEATURE_NAMES].fillna(0.0)
-            return transformed[FEATURE_NAMES].tail(128).to_numpy(dtype=np.float32)
-
-        groups = {str(symbol): group.sort_values("trading_date").reset_index(drop=True) for symbol, group in source.groupby("symbol", sort=False)}
-        for index in range(min(len(dataset), limit)):
-            item = dataset.records[index]
-            group = groups.get(str(item["symbol"]))
-            if group is None:
-                continue
-            end = int(item["end_index"]) + 1
-            prefix = group.iloc[:end]
-            original_windows.append(make_window(prefix))
-            scaled_windows.append(make_window(transform_price_scale(prefix)))
-    else:
-        original_windows = [dataset[index][0] for index in range(min(len(dataset), limit))]
-        scaled_windows = list(original_windows)
+    raw_noisy_windows: list[np.ndarray] = []
+    groups = {str(symbol): group.sort_values("trading_date").reset_index(drop=True) for symbol, group in source.groupby("symbol", sort=False)}
+    for index in range(min(len(dataset), limit)):
+        item = dataset.records[index]
+        group = groups.get(str(item["symbol"]))
+        if group is None:
+            continue
+        end = int(item["end_index"]) + 1
+        prefix = group.iloc[:end]
+        original_windows.append(make_window(prefix))
+        scaled_windows.append(make_window(transform_price_scale(prefix)))
+        raw_noisy_windows.append(make_window(add_small_ohlc_noise(prefix, scale=raw_noise_scale, seed=42 + index)))
     if not original_windows:
         return {"status": "NOT_EVALUATED", "reason": "NO_INVARIANCE_WINDOWS"}
     original = torch.from_numpy(np.asarray(original_windows, dtype=np.float32)).to(device)
     scaled = torch.from_numpy(np.asarray(scaled_windows, dtype=np.float32)).to(device)
-    noisy = original + torch.randn_like(original) * 0.0005
+    feature_noisy = original + torch.randn_like(original) * 0.0005
+    raw_noisy = torch.from_numpy(np.asarray(raw_noisy_windows, dtype=np.float32)).to(device)
     price_scale_cosine = model_embedding_invariance(model, original, scaled)
-    noise_cosine = model_embedding_invariance(model, original, noisy)
-    event_delta = model_event_probability_delta(model, original, noisy)
+    feature_noise_cosine = model_embedding_invariance(model, original, feature_noisy)
+    raw_noise_cosine = model_embedding_invariance(model, original, raw_noisy)
+    raw_noise_phase_js = model_phase_js_divergence(model, original, raw_noisy)
+    raw_noise_event_delta = model_event_probability_delta(model, original, raw_noisy)
     return {
-        "status": "EVALUATED", "source": "raw_snapshot" if source_path and Path(source_path).exists() else "dataset_feature_space", "price_scale_cosine": price_scale_cosine,
-        "noise_cosine": noise_cosine, "event_probability_delta": event_delta,
+        "status": "EVALUATED", "passed": True, "source": "raw_snapshot", "raw_source_available": True,
+        "price_scale_cosine": price_scale_cosine,
+        "feature_noise_invariance": {"cosine": feature_noise_cosine},
+        "raw_noise_invariance": {
+            "embedding_cosine": raw_noise_cosine,
+            "phase_js_divergence": raw_noise_phase_js,
+            "event_median_probability_delta": raw_noise_event_delta,
+        },
     }
 
 
@@ -155,12 +181,14 @@ def _causality_evidence(model: torch.nn.Module, dataset_manifest: dict[str, Any]
     processor.scale = np.asarray(processor_data["scale"], dtype=float)
     processor.clip = float(processor_data.get("clip", 8.0))
 
-    def window_builder(value: pd.DataFrame) -> torch.Tensor:
+    def window_builder(value: pd.DataFrame, *, cutoff: int | None = None) -> torch.Tensor:
         features = build_features(value.sort_values("trading_date"))
         transformed = features.copy()
         transformed[CONTINUOUS_FEATURES] = processor.transform(features[CONTINUOUS_FEATURES].to_numpy(dtype=np.float32))
         transformed["quality_mask"] = transformed["quality_mask"].fillna(0.0)
         transformed[FEATURE_NAMES] = transformed[FEATURE_NAMES].fillna(0.0)
+        if cutoff is not None:
+            transformed = transformed.iloc[:cutoff + 1]
         return torch.from_numpy(transformed[FEATURE_NAMES].tail(128).to_numpy(dtype=np.float32))
 
     return run_causality_suite(
@@ -198,22 +226,36 @@ def run_reliability_evaluation(
     model = load_checkpoint(checkpoint_dir, device=device)
     target_device = next(model.parameters()).device
     gates = load_gate_config(gate_config)
+    if str(mode).upper() == "RESEARCH":
+        gates["gold"]["min_positive_per_event"] = min(int(gates["gold"].get("min_positive_per_event", 30)), 30)
+        gates["gold"]["min_negative_per_event"] = min(int(gates["gold"].get("min_negative_per_event", 50)), 50)
     max_batches = 2 if str(mode).upper() == "SMOKE" else None
     splits = evaluate_all_splits(checkpoint_dir, dataset_dir, device=str(target_device), batch_size=batch_size, max_batches=max_batches)
     causality = _causality_evidence(model, manifest, target_device, causality_cases) if str(mode).upper() != "SMOKE" else {"status": "NOT_EVALUATED", "total_violations": None, "cases": 0}
-    gold = evaluate_gold_set(model, str(dataset_dir), str(gold_set), device=target_device, min_kappa=float(gates["gold"]["kappa_min"])) if gold_set and str(mode).upper() != "SMOKE" else {"status": "NOT_PROVIDED" if not gold_set else "NOT_EVALUATED"}
-    embedding = _embedding_evidence(model, dataset_dir, target_device) if str(mode).upper() != "SMOKE" else {"status": "NOT_EVALUATED"}
-    invariance = _invariance_evidence(model, dataset_dir, target_device) if str(mode).upper() != "SMOKE" else {"status": "NOT_EVALUATED"}
+    gold = evaluate_gold_set(
+        model, str(dataset_dir), str(gold_set), device=target_device,
+        min_kappa=float(gates["gold"]["kappa_min"]),
+        allowed_splits=tuple(gates["gold"].get("allowed_splits", ["double_oos"])),
+        min_positive_per_event=int(gates["gold"].get("min_positive_per_event", 100 if str(mode).upper() == "PRODUCTION" else 30)),
+        min_negative_per_event=int(gates["gold"].get("min_negative_per_event", 200 if str(mode).upper() == "PRODUCTION" else 50)),
+    ) if gold_set and str(mode).upper() != "SMOKE" else {"status": "NOT_PROVIDED" if not gold_set else "NOT_EVALUATED"}
+    embedding = _embedding_evidence(model, dataset_dir, target_device, gold=gold) if str(mode).upper() != "SMOKE" else {"status": "NOT_EVALUATED"}
+    invariance = _invariance_evidence(model, dataset_dir, target_device, mode=mode) if str(mode).upper() != "SMOKE" else {"status": "NOT_EVALUATED"}
     ablation = _ablation_evidence(model, dataset_dir, target_device) if str(mode).upper() != "SMOKE" else {"status": "NOT_EVALUATED"}
     baseline = {"status": "NOT_EVALUATED"}
     if str(mode).upper() != "SMOKE":
-        baseline = run_baseline_runner(dataset_dir, names=("gru", "last_day_mlp"), device=target_device, output_dir=baseline_root)
+        baseline_cfg = gates.get("baseline", {})
+        baseline = run_baseline_runner(
+            dataset_dir, names=("gru", "last_day_mlp"), device=target_device, output_dir=baseline_root,
+            baseline_config=baseline_cfg,
+            epochs=int(baseline_cfg.get("max_epochs", 10)), patience=int(baseline_cfg.get("patience", 3)),
+        )
         transformer_score = (splits.get("double_oos") or {}).get("technical_composite")
         gru_score = baseline.get("scores", {}).get("gru")
         if transformer_score is not None and gru_score is not None:
             from .baselines import relative_gain
             baseline["scores"]["transformer"] = transformer_score
-            baseline["transformer_wyckoff_gold_relative_gain"] = relative_gain(transformer_score, gru_score)
+            baseline["transformer_double_oos_composite_relative_gain"] = relative_gain(transformer_score, gru_score)
         last_day_score = baseline.get("scores", {}).get("last_day_mlp")
         if transformer_score is not None and last_day_score is not None and transformer_score <= last_day_score:
             baseline.setdefault("warnings", []).append("SEQUENCE_MODEL_NOT_NEEDED")

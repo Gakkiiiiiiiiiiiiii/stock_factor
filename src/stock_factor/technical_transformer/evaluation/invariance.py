@@ -25,12 +25,15 @@ def transform_price_scale(frame: pd.DataFrame, scale: float = 10.0) -> pd.DataFr
 def add_small_ohlc_noise(frame: pd.DataFrame, *, scale: float = 0.00075, seed: int = 42) -> pd.DataFrame:
     result = frame.copy()
     rng = np.random.default_rng(seed)
-    noise = rng.normal(0.0, scale, len(result))
-    for column in ("open", "high", "low", "close"):
+    noise = rng.normal(0.0, scale, (len(result), 4))
+    for offset, column in enumerate(("open", "high", "low", "close")):
         if column in result:
-            result[column] = result[column].astype(float) * (1.0 + noise)
+            result[column] = result[column].astype(float) * (1.0 + noise[:, offset])
+    if {"open", "high", "low", "close"} <= set(result.columns):
+        result["high"] = np.maximum.reduce([result["high"], result["open"], result["close"]])
+        result["low"] = np.minimum.reduce([result["low"], result["open"], result["close"]])
     if "amount" in result:
-        result["amount"] = result["amount"].astype(float) * (1.0 + noise)
+        result["amount"] = result["amount"].astype(float) * (1.0 + noise[:, 3])
     return result
 
 
@@ -53,6 +56,17 @@ def model_event_probability_delta(model: torch.nn.Module, original: torch.Tensor
     first = torch.sigmoid(model(original)["events"])
     second = torch.sigmoid(model(transformed)["events"])
     return float(torch.abs(first - second).median().cpu())
+
+
+@torch.no_grad()
+def model_phase_js_divergence(model: torch.nn.Module, original: torch.Tensor, transformed: torch.Tensor) -> float:
+    model.eval()
+    first = torch.softmax(model(original)["phase"], dim=-1)
+    second = torch.softmax(model(transformed)["phase"], dim=-1)
+    midpoint = 0.5 * (first + second)
+    js = 0.5 * (first * (first.clamp_min(1e-12).log() - midpoint.clamp_min(1e-12).log())).sum(dim=-1)
+    js += 0.5 * (second * (second.clamp_min(1e-12).log() - midpoint.clamp_min(1e-12).log())).sum(dim=-1)
+    return float(js.mean().cpu())
 
 
 def small_noise_stability(

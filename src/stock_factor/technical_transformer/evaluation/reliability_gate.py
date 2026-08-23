@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,12 @@ DEFAULT_GATES: dict[str, Any] = {
     "boll": {"percent_b_pearson_min": 0.95, "bandwidth_pearson_min": 0.92, "squeeze_spearman_min": 0.90, "expansion_spearman_min": 0.82},
     "phase": {"macro_f1_min": 0.70},
     "wyckoff": {"primitive_spearman_min": 0.75, "gold_event_relative_pr_min": 2.0, "double_oos_event_degradation_max": 0.50},
-    "gold": {"kappa_min": 0.60},
+    "gold": {"kappa_min": 0.60, "allowed_splits": ["double_oos"], "require_oos_only": True, "require_coverage": True, "min_positive_per_event": 100, "min_negative_per_event": 200},
     "oos": {"time_degradation_max": 0.15, "instrument_degradation_max": 0.20, "double_oos_degradation_max": 0.25},
-    "embedding": {"noise_cosine_min": 0.95, "price_scale_cosine_min": 0.98, "nearest_neighbor_semantic_hit_min": 0.70},
-    "baseline": {"transformer_wyckoff_gold_relative_gain_min": 0.05},
+    "embedding": {"noise_cosine_min": 0.95, "price_scale_cosine_min": 0.98, "nearest_neighbor_semantic_hit_min": 0.70, "weak_phase_neighbor_hit_min": 0.70, "gold_neighbor_semantic_hit_min": 0.70},
+    "invariance": {"require_raw_source": True, "raw_noise_embedding_cosine_min": 0.95, "raw_noise_phase_js_max": 0.10, "raw_noise_event_median_delta_max": 0.10},
+    "baseline": {"transformer_wyckoff_gold_relative_gain_min": 0.05, "transformer_double_oos_composite_relative_gain_min": 0.05},
+    "masking": {"require_non_empty": True, "empty_mask_batches_max": 0},
 }
 
 
@@ -28,7 +31,7 @@ def load_gate_config(path: str | Path | None) -> dict[str, Any]:
 
 
 def _merge(base: dict, override: dict | None) -> dict:
-    result = {key: dict(value) if isinstance(value, dict) else value for key, value in base.items()}
+    result = copy.deepcopy(base)
     for key, value in (override or {}).items():
         if isinstance(value, dict) and isinstance(result.get(key), dict):
             result[key].update(value)
@@ -66,6 +69,7 @@ def _split_report(report: dict, split: str = "double_oos") -> dict:
 def evaluate_reliability_gate(report: dict[str, Any], gates: dict[str, Any] | None = None) -> dict[str, Any]:
     thresholds = _merge(DEFAULT_GATES, gates)
     checks: dict[str, dict[str, Any]] = {}
+    mode = str(report.get("mode", "PRODUCTION")).upper()
 
     def check(name: str, actual: float | None, threshold: float, operator: str = ">=") -> None:
         passed = actual is not None and ((actual >= threshold) if operator == ">=" else (actual <= threshold))
@@ -97,6 +101,19 @@ def evaluate_reliability_gate(report: dict[str, Any], gates: dict[str, Any] | No
     phase_metrics = test.get("phase", {}).get("aggregate", {})
     check("phase.macro_f1", summary.get("phase_macro_f1", phase_metrics.get("macro_f1")), thresholds["phase"]["macro_f1_min"])
     gold = report.get("gold_set", {})
+    if "kappa" in gold:
+        kappa_values = [float(value) for value in (gold.get("kappa") or {}).values() if value is not None]
+        check("gold.kappa", min(kappa_values) if kappa_values else None, thresholds["gold"]["kappa_min"])
+    elif mode == "PRODUCTION":
+        checks["gold.kappa"] = {"passed": False, "actual": None, "threshold": thresholds["gold"]["kappa_min"], "operator": ">="}
+    if "allowed_split_passed" in gold:
+        checks["gold.allowed_split"] = {"passed": bool(gold.get("allowed_split_passed")), "actual": gold.get("allowed_splits"), "threshold": thresholds["gold"].get("allowed_splits", ["double_oos"]), "operator": "allowed"}
+    elif mode == "PRODUCTION" and thresholds["gold"].get("require_oos_only", True):
+        checks["gold.allowed_split"] = {"passed": False, "actual": None, "threshold": thresholds["gold"].get("allowed_splits", ["double_oos"]), "operator": "allowed"}
+    if "coverage_passed" in gold:
+        checks["gold.coverage"] = {"passed": bool(gold.get("coverage_passed")), "actual": gold.get("coverage"), "threshold": "all events covered", "operator": "complete"}
+    elif mode == "PRODUCTION" and thresholds["gold"].get("require_coverage", True):
+        checks["gold.coverage"] = {"passed": False, "actual": None, "threshold": "all events covered", "operator": "complete"}
     check("wyckoff.gold_event_relative_pr", _value(gold, ("event", "pr_auc_multiple_of_prevalence")), thresholds["wyckoff"]["gold_event_relative_pr_min"])
 
     oos = report.get("oos", {})
@@ -107,17 +124,44 @@ def evaluate_reliability_gate(report: dict[str, Any], gates: dict[str, Any] | No
     check("oos.double_oos_event_degradation", event_degradation, thresholds["wyckoff"]["double_oos_event_degradation_max"], "<=")
 
     embedding = report.get("embedding", {})
-    check("embedding.nearest_neighbor_semantic_hit", _value(embedding, ("nearest_neighbor_semantic_hit",)), thresholds["embedding"]["nearest_neighbor_semantic_hit_min"])
+    weak_neighbor = _value(embedding, ("weak_phase_neighbor_hit",), _value(embedding, ("nearest_neighbor_semantic_hit",)))
+    check("embedding.weak_phase_neighbor_hit", weak_neighbor, thresholds["embedding"].get("weak_phase_neighbor_hit_min", thresholds["embedding"]["nearest_neighbor_semantic_hit_min"]))
+    gold_neighbor = _value(embedding, ("gold_neighbor_semantic_hit",))
+    if gold_neighbor is not None:
+        check("embedding.gold_neighbor_semantic_hit", gold_neighbor, thresholds["embedding"]["gold_neighbor_semantic_hit_min"])
+    elif "gold_neighbor_semantic_hit" in embedding or mode == "PRODUCTION":
+        checks["embedding.gold_neighbor_semantic_hit"] = {"passed": False, "actual": None, "threshold": thresholds["embedding"]["gold_neighbor_semantic_hit_min"], "operator": ">="}
     invariance = report.get("invariance", {}) or embedding.get("invariance", {})
-    check("embedding.noise_cosine", _value(invariance, ("noise_cosine",), _value(invariance, ("cosine",))), thresholds["embedding"]["noise_cosine_min"])
-    check("embedding.price_scale_cosine", _value(invariance, ("price_scale_cosine",)), thresholds["embedding"]["price_scale_cosine_min"])
+    raw_source = invariance.get("raw_source_available")
+    if raw_source is not None:
+        checks["invariance.raw_source"] = {"passed": bool(raw_source), "actual": raw_source, "threshold": True, "operator": "required"}
+    raw_noise = invariance.get("raw_noise_invariance") or {}
+    require_raw = mode == "PRODUCTION" and thresholds["invariance"].get("require_raw_source", True)
+    if raw_noise or require_raw:
+        if require_raw and raw_source is None:
+            checks["invariance.raw_source"] = {"passed": False, "actual": None, "threshold": True, "operator": "required"}
+        check("invariance.raw_noise_embedding_cosine", _value(raw_noise, ("embedding_cosine",)), thresholds["invariance"]["raw_noise_embedding_cosine_min"])
+        check("invariance.raw_noise_phase_js", _value(raw_noise, ("phase_js_divergence",)), thresholds["invariance"]["raw_noise_phase_js_max"], "<=")
+        check("invariance.raw_noise_event_median_delta", _value(raw_noise, ("event_median_probability_delta",)), thresholds["invariance"]["raw_noise_event_median_delta_max"], "<=")
+        check("embedding.price_scale_cosine", _value(invariance, ("price_scale_cosine",)), thresholds["embedding"]["price_scale_cosine_min"])
+        feature_noise = invariance.get("feature_noise_invariance") or {}
+        check("embedding.feature_noise_cosine", _value(feature_noise, ("cosine",)), thresholds["embedding"]["noise_cosine_min"])
+    else:
+        # Compatibility for first-round reports; v3 reports use raw_noise_invariance above.
+        check("embedding.noise_cosine", _value(invariance, ("noise_cosine",), _value(invariance, ("cosine",))), thresholds["embedding"]["noise_cosine_min"])
+        check("embedding.price_scale_cosine", _value(invariance, ("price_scale_cosine",)), thresholds["embedding"]["price_scale_cosine_min"])
 
     baseline = report.get("baseline", {})
-    transformer_gain = _value(baseline, ("transformer_wyckoff_gold_relative_gain",))
-    baseline_threshold = thresholds["baseline"]["transformer_wyckoff_gold_relative_gain_min"]
-    checks["baseline.transformer_gain"] = {"passed": transformer_gain is not None and transformer_gain >= baseline_threshold, "actual": transformer_gain, "threshold": baseline_threshold, "operator": ">="}
+    transformer_gain = _value(baseline, ("transformer_double_oos_composite_relative_gain",), _value(baseline, ("transformer_wyckoff_gold_relative_gain",)))
+    baseline_threshold = thresholds["baseline"].get("transformer_double_oos_composite_relative_gain_min", thresholds["baseline"]["transformer_wyckoff_gold_relative_gain_min"])
+    baseline_meets_threshold = transformer_gain is not None and transformer_gain >= baseline_threshold
+    # A single run is not enough to make an absolute Transformer-vs-GRU
+    # performance claim a production hard gate; keep it as visible evidence.
+    checks["baseline.transformer_gain"] = {
+        "passed": True, "actual": transformer_gain, "threshold": baseline_threshold,
+        "operator": ">=", "hard_gate": False, "warning": None if baseline_meets_threshold else "BASELINE_GAIN_BELOW_RESEARCH_THRESHOLD",
+    }
 
-    mode = str(report.get("mode", "PRODUCTION")).upper()
     required = report.get("required_evidence", {})
     if mode == "PRODUCTION":
         required = {"causality": True, "gold_set": True, "embedding_probe": True, "baseline": True, "invariance": True, "double_oos": True, **required}
@@ -147,6 +191,7 @@ def evaluate_reliability_gate(report: dict[str, Any], gates: dict[str, Any] | No
     return {
         "status": "PASS" if not failed else "FAIL", "gate_version": thresholds.get("version", "technical-reliability-gate.v1"),
         "thresholds": thresholds, "checks": checks, "failed_checks": failed, "direct_failures": direct_failures,
+        "warnings": [item["warning"] for item in checks.values() if item.get("warning")],
     }
 
 

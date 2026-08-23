@@ -226,6 +226,8 @@ def _eligible_samples(
                 continue
             if float(listing_days.iloc[position]) < config.min_listing_days:
                 continue
+            if float(quality[position]) <= 0.0:
+                continue
             quality_ratio = float(np.mean(quality[window_start:position + 1]))
             if quality_ratio < config.min_quality_ratio:
                 continue
@@ -264,6 +266,8 @@ def _eligible_samples_for_range(
         if dates.iloc[window_start] < start_date:
             continue
         if float(listing_days.iloc[position]) < config.min_listing_days:
+            continue
+        if float(quality[position]) <= 0.0:
             continue
         quality_ratio = float(np.mean(quality[window_start:position + 1]))
         if quality_ratio < config.min_quality_ratio:

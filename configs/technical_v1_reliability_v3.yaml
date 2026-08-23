@@ -8,6 +8,32 @@ training:
   gradient_accumulation: 2
   run_stages: [masked_pretraining, ma_bollinger, wyckoff_primitives, wyckoff_phase_events]
 
+baseline:
+  models: [gru, last_day_mlp]
+  max_epochs: 10
+  patience: 3
+  use_event_pos_weight: true
+  selection:
+    metric: technical_composite
+
+gold:
+  role: RESEARCH
+  allowed_splits: [double_oos]
+  kappa_min: 0.60
+  min_positive_per_event: 30
+  min_negative_per_event: 50
+
+invariance:
+  require_raw_snapshot: true
+  price_scale:
+    multiplier: 10.0
+    embedding_cosine_min: 0.98
+  raw_noise:
+    sigma: 0.0005
+    embedding_cosine_min: 0.95
+    phase_js_max: 0.10
+    event_median_delta_max: 0.10
+
 stages:
   - name: masked_pretraining
     epochs: 6

@@ -178,6 +178,11 @@ def _evaluate(
     predictions: dict[str, list[np.ndarray]] = {"ma": [], "bollinger": [], "wyckoff_primitives": [], "phase": [], "events": []}
     targets: list[np.ndarray] = []
     valid_targets: list[np.ndarray] = []
+    empty_mask_batches = 0
+    masked_feature_count = 0
+    masked_day_count = 0
+    valid_feature_count = 0
+    valid_day_count = 0
     for batch_index, (x, y, label_valid, _) in enumerate(loader):
         if max_batches is not None and batch_index >= max_batches:
             break
@@ -193,6 +198,13 @@ def _evaluate(
                 x, valid_days=valid_days, feature_validity=feature_validity,
                 mode=stage.mask_mode or "mixed", seed=seed + batch_index,
             )
+            masked_feature_count += int(masked.positions.sum().item())
+            masked_day_count += int(masked.positions.any(dim=-1).sum().item())
+            valid_feature_count += int(feature_validity.sum().item())
+            valid_day_count += int(valid_days.sum().item())
+            if not masked.positions.any():
+                empty_mask_batches += 1
+                continue
             output = model(masked.input, mask_positions=masked.positions)
             target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
             loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
@@ -221,6 +233,12 @@ def _evaluate(
             label_valid=np.concatenate(valid_targets),
         ))
         result["technical_composite"] = technical_composite(result)
+    if stage.name == "masked_pretraining":
+        result["masking"] = {
+            "masked_feature_ratio": masked_feature_count / max(valid_feature_count, 1),
+            "masked_day_ratio": masked_day_count / max(valid_day_count, 1),
+            "empty_mask_batches": empty_mask_batches,
+        }
     selection = select_stage_score(stage.name, result)
     result["selection_score"] = selection.score
     result["selection_components"] = selection.components
@@ -261,6 +279,18 @@ def train(config: dict[str, Any]) -> Path:
     event_weight = _event_weights(train_dataset, device)
     for stage_name in stages:
         stage = _stage_config(config, stage_name)
+        if stage.name == "masked_pretraining" and len(train_dataset):
+            probe_batch = next(iter(train_loader))
+            probe_x = probe_batch[0].to(device)
+            probe_valid_days = probe_x[..., FEATURE_NAMES.index("quality_mask")] > 0
+            probe_feature_validity = torch.ones_like(probe_x, dtype=torch.bool)
+            probe_feature_validity[..., FEATURE_NAMES.index("turnover")] = probe_x[..., FEATURE_NAMES.index("turnover_observed")] > 0
+            probe_mask = apply_mask(
+                probe_x, valid_days=probe_valid_days, feature_validity=probe_feature_validity,
+                mode=stage.mask_mode or "mixed", seed=seed,
+            )
+            if not probe_mask.positions.any():
+                raise RuntimeError("masked pretraining produced no masked positions")
         optimizer = build_optimizer(model, stage, float(config.get("training", {}).get("weight_decay", 0.01)))
         scaler = torch.amp.GradScaler("cuda", enabled=device.type == "cuda")
         best_score = float("-inf")
@@ -272,6 +302,11 @@ def train(config: dict[str, Any]) -> Path:
             model.train()
             running = 0.0
             seen = 0
+            empty_mask_batches = 0
+            masked_feature_count = 0
+            masked_day_count = 0
+            valid_feature_count = 0
+            valid_day_count = 0
             optimizer.zero_grad(set_to_none=True)
             configured_max_steps = next((item.get("max_steps_per_epoch") for item in config.get("stages", []) if item.get("name") == stage.name), None)
             limit = min(len(train_loader), int(configured_max_steps)) if configured_max_steps is not None else len(train_loader)
@@ -291,6 +326,13 @@ def train(config: dict[str, Any]) -> Path:
                             x, valid_days=valid_days, feature_validity=feature_validity,
                             mode=stage.mask_mode or "mixed", seed=seed + epoch * 100000 + step,
                         )
+                        masked_feature_count += int(masked.positions.sum().item())
+                        masked_day_count += int(masked.positions.any(dim=-1).sum().item())
+                        valid_feature_count += int(feature_validity.sum().item())
+                        valid_day_count += int(valid_days.sum().item())
+                        if not masked.positions.any():
+                            empty_mask_batches += 1
+                            continue
                         output = model(masked.input, mask_positions=masked.positions)
                         target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
                         raw_loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
@@ -319,6 +361,14 @@ def train(config: dict[str, Any]) -> Path:
                 event_weight=event_weight,
             )
             metrics = {"stage": stage.name, "epoch": epoch, "train_loss": running / max(seen, 1), "valid": validation}
+            if stage.name == "masked_pretraining":
+                metrics["masking"] = {
+                    "masked_feature_ratio": masked_feature_count / max(valid_feature_count, 1),
+                    "masked_day_ratio": masked_day_count / max(valid_day_count, 1),
+                    "empty_mask_batches": empty_mask_batches,
+                }
+                if empty_mask_batches:
+                    raise RuntimeError("masked pretraining encountered an empty mask batch")
             selection = select_stage_score(stage.name, validation)
             score = float(selection.score)
             improved = score > best_score + 1e-8

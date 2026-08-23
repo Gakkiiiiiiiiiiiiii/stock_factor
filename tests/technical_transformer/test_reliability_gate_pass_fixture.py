@@ -24,10 +24,10 @@ def test_complete_production_fixture_passes_and_promotes() -> None:
         checkpoint_identity=checkpoint, dataset_manifest=manifest,
         splits={"valid": _split(), "time_test": _split(), "instrument_test": _split(), "double_oos": _split()},
         mode="PRODUCTION", causality={"status": "EVALUATED", "total_violations": 0},
-        gold_set={"status": "EVALUATED", "passed": True, "phase": {"macro_f1": 1.0}, "event": {"pr_auc_multiple_of_prevalence": 2.0}},
-        embedding={"status": "EVALUATED", "passed": True, "nearest_neighbor_semantic_hit": 1.0},
-        invariance={"status": "EVALUATED", "passed": True, "noise_cosine": 1.0, "price_scale_cosine": 1.0},
-        baseline={"status": "EVALUATED", "passed": True, "transformer_wyckoff_gold_relative_gain": 0.1},
+        gold_set={"status": "EVALUATED", "passed": True, "kappa": {"events": 1.0}, "allowed_splits": ["double_oos"], "allowed_split_passed": True, "coverage_passed": True, "phase": {"macro_f1": 1.0}, "event": {"pr_auc_multiple_of_prevalence": 2.0}},
+        embedding={"status": "EVALUATED", "passed": True, "weak_phase_neighbor_hit": 1.0, "gold_neighbor_semantic_hit": 1.0},
+        invariance={"status": "EVALUATED", "passed": True, "raw_source_available": True, "feature_noise_invariance": {"cosine": 1.0}, "raw_noise_invariance": {"embedding_cosine": 1.0, "phase_js_divergence": 0.0, "event_median_probability_delta": 0.0}, "price_scale_cosine": 1.0},
+        baseline={"status": "EVALUATED", "passed": True, "transformer_double_oos_composite_relative_gain": 0.1},
     )
     assert report["reliability_gate"]["status"] == "PASS"
     checkpoint_dir = Path(__file__).parent / "_promotion_fixture_tmp"

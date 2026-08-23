@@ -21,6 +21,7 @@ class GoldSetRecord:
     annotator_a_labels: dict[str, int | float] | None = None
     annotator_b_labels: dict[str, int | float] | None = None
     notes: str = ""
+    expected_split: str | None = None
 
 
 def load_gold_set(path: str | Path) -> list[GoldSetRecord]:

@@ -203,3 +203,33 @@ def nearest_neighbor_audit(
             hits.extend(bool(np.array_equal(labels[index], labels[item])) for item in top)
     rate = float(np.mean(hits)) if hits else None
     return {"k": k, "neighbors": neighbors, "semantic_hit_rate": rate, "nearest_neighbor_semantic_hit": rate}
+
+
+def weak_phase_neighbor_hit(embeddings: np.ndarray, phase_labels: np.ndarray, *, k: int = 20) -> float | None:
+    """Nearest-neighbor agreement against dataset-derived weak phase labels."""
+    values = np.asarray(phase_labels)
+    valid = np.isfinite(values).all(axis=1) if values.ndim == 2 else np.isfinite(values)
+    if not np.any(valid):
+        return None
+    labels = np.argmax(values[valid], axis=1) if values.ndim == 2 else (values[valid] > 0.5).astype(int)
+    return nearest_neighbor_audit(np.asarray(embeddings)[valid], labels=labels, k=k).get("semantic_hit_rate")
+
+
+def gold_neighbor_semantic_hit(embeddings: np.ndarray, event_labels: np.ndarray) -> float | None:
+    """Nearest-neighbor agreement using frozen Gold event labels."""
+    values = np.asarray(embeddings, dtype=float)
+    labels = np.asarray(event_labels, dtype=int)
+    if values.ndim != 2 or labels.ndim != 2 or len(values) < 2 or len(values) != len(labels):
+        return None
+    normalized = values / np.maximum(np.linalg.norm(values, axis=1, keepdims=True), 1e-12)
+    similarity = normalized @ normalized.T
+    np.fill_diagonal(similarity, -np.inf)
+    hits: list[float] = []
+    for index in range(len(values)):
+        neighbor = int(np.argmax(similarity[index]))
+        positive = np.flatnonzero(labels[index] > 0)
+        if len(positive):
+            hits.append(float(np.any(labels[neighbor, positive] > 0)))
+        else:
+            hits.append(float(np.array_equal(labels[index], labels[neighbor])))
+    return float(np.mean(hits)) if hits else None
