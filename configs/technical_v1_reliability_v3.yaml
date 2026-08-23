@@ -1,0 +1,54 @@
+project:
+  name: technical-transformer-v1-reliability-v3
+
+training:
+  selection_policy_version: technical-selection.v1
+  seed: 42
+  batch_size: 32
+  gradient_accumulation: 2
+  run_stages: [masked_pretraining, ma_bollinger, wyckoff_primitives, wyckoff_phase_events]
+
+stages:
+  - name: masked_pretraining
+    epochs: 6
+    encoder_lr: 0.0003
+    head_lr: 0.0003
+    selection: mask_loss
+    mask_mode: mixed
+    patience: 3
+    max_steps_per_epoch: null
+  - name: ma_bollinger
+    epochs: 10
+    encoder_lr: 0.0001
+    head_lr: 0.0001
+    selection: ma_boll_composite
+    active_heads: [ma, bollinger]
+    patience: 3
+    max_steps_per_epoch: null
+  - name: wyckoff_primitives
+    epochs: 10
+    encoder_lr: 0.00005
+    head_lr: 0.0001
+    selection: primitive_composite
+    active_heads: [ma, bollinger, wyckoff_primitives]
+    patience: 3
+    max_steps_per_epoch: null
+  - name: wyckoff_phase_events
+    epochs: 10
+    encoder_lr: 0.00002
+    head_lr: 0.0001
+    selection: technical_composite
+    active_heads: [ma, bollinger, wyckoff_primitives, phase, events]
+    patience: 3
+    max_steps_per_epoch: null
+
+reliability:
+  mode: PRODUCTION
+  gate_config: configs/technical_reliability_gate_v1.yaml
+  require:
+    causality: true
+    gold_set: true
+    embedding_probe: true
+    baseline: true
+    invariance: true
+    double_oos: true

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import importlib.util
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,6 @@ from .features import build_features
 from .labels import build_labels
 from .schemas import CONTINUOUS_FEATURES, FEATURE_NAMES, FEATURE_SCHEMA, LABEL_SCHEMA, STATE_FEATURES, schema_hash
 from .snapshot import QuantSnapshot
-
 
 CANONICAL_SPLITS = ("train", "valid", "time_test", "instrument_test", "double_oos")
 TURNOVER_DERIVED_FEATURES = {"turnover", "turnover_ratio_5", "turnover_ratio_20", "turnover_zscore_20"}
@@ -353,6 +352,10 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
         if existing.get("source_market_snapshot_id") == snapshot.snapshot_id:
             if existing.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"] or existing.get("label_schema_version") != LABEL_SCHEMA.version:
                 raise RuntimeError(f"dataset directory is sealed with an older schema; choose a new V2 output directory: {output}")
+            series_path = output / "series"
+            legacy_series = next(series_path.glob("*.npz"), None) if series_path.exists() else None
+            if legacy_series is not None and "label_valid" not in np.load(legacy_series).files:
+                raise RuntimeError(f"dataset directory is missing label_valid; rebuild the sealed dataset: {output}")
             return existing
         raise RuntimeError(f"dataset directory already sealed for another snapshot: {output}")
     output.mkdir(parents=True, exist_ok=True)
@@ -414,11 +417,12 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
             transformed[CONTINUOUS_FEATURES] = processor.transform(features[CONTINUOUS_FEATURES].to_numpy(dtype=np.float32))
             transformed[STATE_FEATURES] = features[STATE_FEATURES].fillna(0.0).to_numpy(dtype=np.float32)
             x = transformed[FEATURE_NAMES].to_numpy(dtype=np.float32)
-            y = labels[LABEL_SCHEMA.names].to_numpy(dtype=np.float32)
+            y = labels.values[LABEL_SCHEMA.names].to_numpy(dtype=np.float32)
+            label_valid = labels.valid[LABEL_SCHEMA.names].to_numpy(dtype=np.uint8)
             quality = transformed["quality_mask"].to_numpy(dtype=np.float32)
             np.savez_compressed(
                 series_dir / f"{symbol}.npz", dates=group["trading_date"].astype("int64").to_numpy(),
-                features=x, labels=y, quality=quality,
+                features=x, labels=y, label_valid=label_valid, quality=quality,
             )
             listing = group["listing_days"] if "listing_days" in group else pd.Series(np.arange(1, len(group) + 1))
             symbol_records: list[dict[str, Any]] = []
@@ -455,7 +459,8 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
         leakage_audit = {"passed": False, "violations": [{"type": "audit_error", "message": str(exc)}]}
     dataset_manifest = {
         "schema_version": "technical-dataset.v2", "dataset_id": output.name,
-        "source_market_snapshot_id": snapshot.snapshot_id, "source_data_version": snapshot.manifest.get("data_version"),
+        "source_market_snapshot_id": snapshot.snapshot_id, "source_market_snapshot_path": str(snapshot.bars_path.resolve()),
+        "source_data_version": snapshot.manifest.get("data_version"),
         "adjustment": snapshot.manifest.get("adjustment"), "frequency": snapshot.manifest.get("frequency"),
         "symbols_hash": symbol_hash(symbols),
         "schema_hash": schema_hash({"features": FEATURE_SCHEMA, "labels": LABEL_SCHEMA.as_dict()}),
@@ -511,15 +516,20 @@ class TSDatasetHAdapter:
             self._cache[symbol] = {key: loaded[key] for key in loaded.files}
         return self._cache[symbol]
 
-    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
         item = self.records[index]
         series = self._series(item["symbol"])
         start, end = int(item["start_index"]), int(item["end_index"] + 1)
-        return series["features"][start:end], series["labels"][item["end_index"]], item
+        label_valid = series.get("label_valid")
+        if label_valid is None:
+            # Datasets created before the V2 validity contract are explicitly
+            # treated as fully valid only for backwards-compatible reads.
+            label_valid = np.ones_like(series["labels"], dtype=np.uint8)
+        return series["features"][start:end], series["labels"][item["end_index"]], label_valid[item["end_index"]], item
 
 
 class TechnicalWindowDataset(TSDatasetHAdapter):
     """PyTorch Dataset-compatible alias for the V1 trainer."""
 
-    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    def __getitem__(self, index: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
         return super().__getitem__(index)

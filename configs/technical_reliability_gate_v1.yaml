@@ -1,0 +1,41 @@
+version: technical-reliability-gate.v1
+
+data:
+  future_leakage_violations_max: 0
+  shortcut_violations_max: 0
+  split_overlap_max: 0
+
+ma:
+  slope_sign_accuracy_min: 0.90
+  slope_pearson_min: 0.88
+  alignment_spearman_min: 0.92
+
+boll:
+  percent_b_pearson_min: 0.95
+  bandwidth_pearson_min: 0.92
+  squeeze_spearman_min: 0.90
+  expansion_spearman_min: 0.82
+
+phase:
+  macro_f1_min: 0.70
+
+wyckoff:
+  primitive_spearman_min: 0.75
+  gold_event_relative_pr_min: 2.0
+  double_oos_event_degradation_max: 0.50
+
+gold:
+  kappa_min: 0.60
+
+oos:
+  time_degradation_max: 0.15
+  instrument_degradation_max: 0.20
+  double_oos_degradation_max: 0.25
+
+embedding:
+  noise_cosine_min: 0.95
+  price_scale_cosine_min: 0.98
+  nearest_neighbor_semantic_hit_min: 0.70
+
+baseline:
+  transformer_wyckoff_gold_relative_gain_min: 0.05

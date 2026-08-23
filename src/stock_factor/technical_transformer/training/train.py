@@ -17,12 +17,13 @@ from torch.utils.data import DataLoader
 from ..data.dataset import DatasetConfig, TechnicalWindowDataset, build_dataset
 from ..data.schemas import FEATURE_NAMES, FEATURE_SCHEMA, LABEL_SCHEMA, MASK_RECONSTRUCTION_FEATURES
 from ..data.snapshot import QuantSnapshot
+from ..evaluation.composite import evaluate_prediction_arrays, technical_composite
 from ..model.encoder import TechnicalTransformer
 from ..model.heads import TechnicalHeads
 from ..model.losses import compute_loss, compute_mask_loss, event_pos_weight
 from .masking import apply_mask
 from .optimizer import TrainingStage, build_optimizer, optimizer_group_lrs
-
+from .selection import StageSelectionResult, select_stage_score
 
 MASK_TARGET_FEATURES = MASK_RECONSTRUCTION_FEATURES
 
@@ -61,9 +62,9 @@ def seed_everything(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def _collate(batch: list[tuple[np.ndarray, np.ndarray, dict[str, Any]]]) -> tuple[torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
-    x, y, metadata = zip(*batch)
-    return torch.from_numpy(np.stack(x)), torch.from_numpy(np.stack(y)), list(metadata)
+def _collate(batch: list[tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
+    x, y, valid, metadata = zip(*batch)
+    return torch.from_numpy(np.stack(x)), torch.from_numpy(np.stack(y)), torch.from_numpy(np.stack(valid)), list(metadata)
 
 
 def _git_commit() -> str:
@@ -95,18 +96,9 @@ def _stage_config(config: dict[str, Any], name: str) -> TrainingStage:
     raise ValueError(f"stage not found: {name}")
 
 
-def _validation_composite(metrics: dict[str, float]) -> float:
-    """Return a bounded, group-balanced validation score, never total loss."""
-    groups = {
-        "ma": metrics.get("ma_score", metrics.get("ma_direction_accuracy", 0.0)),
-        "bollinger": metrics.get("bollinger_score", 0.0),
-        "wyckoff_primitives": metrics.get("wyckoff_primitive_score", 0.0),
-        "phase": metrics.get("phase_score", 0.0),
-        "events": metrics.get("event_score", 0.0),
-    }
-    weights = {"ma": 0.20, "bollinger": 0.20, "wyckoff_primitives": 0.25, "phase": 0.15, "events": 0.20}
-    active = [name for name, value in groups.items() if value is not None]
-    return float(sum(weights[name] * float(groups[name]) for name in active))
+def _validation_composite(metrics: dict[str, Any]) -> float:
+    """Compatibility wrapper for callers that used the old helper."""
+    return float(select_stage_score(str(metrics.get("stage", "wyckoff_phase_events")), metrics).score)
 
 
 def _save_checkpoint(
@@ -122,6 +114,7 @@ def _save_checkpoint(
     optimizer_steps: int,
     best_valid: bool,
     optimizer: torch.optim.Optimizer,
+    selection: StageSelectionResult,
 ) -> Path:
     checkpoint_id = f"tech-v1-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{stage.name}-e{epoch:03d}"
     directory = output_dir / checkpoint_id
@@ -158,6 +151,10 @@ def _save_checkpoint(
             "optimizer_steps": int(optimizer_steps), "optimizer_group_lrs": optimizer_group_lrs(optimizer),
         },
         "validation": {"report_id": f"{checkpoint_id}:valid", "best_valid": best_valid},
+        "selection": {
+            "policy_version": "technical-selection.v1", "stage": selection.stage,
+            "score": selection.score, "components": selection.components, "valid": selection.valid,
+        },
         "test": {"executed": False}, "reliability_gate": {"status": "NOT_EVALUATED"},
     }
     (directory / "checkpoint_manifest.json").write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -173,39 +170,62 @@ def _evaluate(
     *,
     seed: int,
     max_batches: int | None = None,
-) -> dict[str, float]:
+    event_weight: torch.Tensor | None = None,
+) -> dict[str, Any]:
     model.eval()
     sums: dict[str, float] = {}
     count = 0
-    direction_hits = 0
-    direction_total = 0
-    for batch_index, (x, y, _) in enumerate(loader):
+    predictions: dict[str, list[np.ndarray]] = {"ma": [], "bollinger": [], "wyckoff_primitives": [], "phase": [], "events": []}
+    targets: list[np.ndarray] = []
+    valid_targets: list[np.ndarray] = []
+    for batch_index, (x, y, label_valid, _) in enumerate(loader):
         if max_batches is not None and batch_index >= max_batches:
             break
         x, y = x.to(device), y.to(device)
+        label_valid = label_valid.to(device=device, dtype=torch.bool)
         if stage.name == "masked_pretraining":
-            masked = apply_mask(x, mode=stage.mask_mode or "mixed", seed=seed + batch_index)
+            quality_index = FEATURE_NAMES.index("quality_mask")
+            turnover_index = FEATURE_NAMES.index("turnover_observed")
+            valid_days = x[..., quality_index] > 0
+            feature_validity = torch.ones_like(x, dtype=torch.bool)
+            feature_validity[..., FEATURE_NAMES.index("turnover")] = x[..., turnover_index] > 0
+            masked = apply_mask(
+                x, valid_days=valid_days, feature_validity=feature_validity,
+                mode=stage.mask_mode or "mixed", seed=seed + batch_index,
+            )
             output = model(masked.input, mask_positions=masked.positions)
             target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
             loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
             items = {"mask": float(loss.cpu())}
         else:
             output = model(x)
-            loss, items = compute_loss(output, y, stage=stage.name, active_heads=stage.active_heads or None)
+            loss, items = compute_loss(
+                output, y, stage=stage.name, active_heads=stage.active_heads or None,
+                label_valid=label_valid, event_weight=event_weight,
+            )
+            predictions["ma"].append(output["ma"].cpu().numpy())
+            predictions["bollinger"].append(output["bollinger"].cpu().numpy())
+            predictions["wyckoff_primitives"].append(output["wyckoff_primitives"].cpu().numpy())
+            predictions["phase"].append(output["phase"].cpu().numpy())
+            predictions["events"].append(torch.sigmoid(output["events"]).cpu().numpy())
+            targets.append(y.cpu().numpy())
+            valid_targets.append(label_valid.cpu().numpy())
         sums["loss"] = sums.get("loss", 0.0) + float(loss.cpu())
         for name, value in items.items():
             sums[name] = sums.get(name, 0.0) + value
-        if stage.name != "masked_pretraining":
-            predicted = output["ma"][:, :6].sign()
-            actual = y[:, :6].sign()
-            direction_hits += int((predicted == actual).sum().cpu())
-            direction_total += int(actual.numel())
         count += 1
-    result = {name: value / max(count, 1) for name, value in sums.items()}
-    if direction_total:
-        result["ma_direction_accuracy"] = direction_hits / direction_total
-        result["ma_score"] = result["ma_direction_accuracy"]
-    result["validation_composite"] = _validation_composite(result)
+    result: dict[str, Any] = {name: value / max(count, 1) for name, value in sums.items()}
+    if targets:
+        result.update(evaluate_prediction_arrays(
+            np.concatenate(targets), {key: np.concatenate(value) for key, value in predictions.items()},
+            label_valid=np.concatenate(valid_targets),
+        ))
+        result["technical_composite"] = technical_composite(result)
+    selection = select_stage_score(stage.name, result)
+    result["selection_score"] = selection.score
+    result["selection_components"] = selection.components
+    result["selection_valid"] = selection.valid
+    result["validation_composite"] = selection.score
     return result
 
 
@@ -213,7 +233,8 @@ def _event_weights(dataset: TechnicalWindowDataset, device: torch.device) -> tor
     if len(dataset) == 0:
         return None
     values = np.stack([dataset[index][1][LABEL_SCHEMA.slices["events"]] for index in range(len(dataset))])
-    return event_pos_weight(torch.from_numpy(values).to(device))
+    valid = np.stack([dataset[index][2][LABEL_SCHEMA.slices["events"]] for index in range(len(dataset))])
+    return event_pos_weight(torch.from_numpy(values).to(device), torch.from_numpy(valid).to(device))
 
 
 def train(config: dict[str, Any]) -> Path:
@@ -252,22 +273,34 @@ def train(config: dict[str, Any]) -> Path:
             running = 0.0
             seen = 0
             optimizer.zero_grad(set_to_none=True)
-            configured_max_steps = next(item.get("max_steps_per_epoch") for item in config.get("stages", []) if item.get("name") == stage.name)
+            configured_max_steps = next((item.get("max_steps_per_epoch") for item in config.get("stages", []) if item.get("name") == stage.name), None)
             limit = min(len(train_loader), int(configured_max_steps)) if configured_max_steps is not None else len(train_loader)
-            for step, (x, y, _) in enumerate(train_loader):
+            for step, (x, y, label_valid, _) in enumerate(train_loader):
                 if step >= limit:
                     break
                 x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+                label_valid = label_valid.to(device=device, dtype=torch.bool, non_blocking=True)
                 with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
                     if stage.name == "masked_pretraining":
-                        masked = apply_mask(x, mode=stage.mask_mode or "mixed", seed=seed + epoch * 100000 + step)
+                        quality_index = FEATURE_NAMES.index("quality_mask")
+                        turnover_index = FEATURE_NAMES.index("turnover_observed")
+                        valid_days = x[..., quality_index] > 0
+                        feature_validity = torch.ones_like(x, dtype=torch.bool)
+                        feature_validity[..., FEATURE_NAMES.index("turnover")] = x[..., turnover_index] > 0
+                        masked = apply_mask(
+                            x, valid_days=valid_days, feature_validity=feature_validity,
+                            mode=stage.mask_mode or "mixed", seed=seed + epoch * 100000 + step,
+                        )
                         output = model(masked.input, mask_positions=masked.positions)
                         target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
                         raw_loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
                         items = {"mask": float(raw_loss.detach().cpu())}
                     else:
                         output = model(x)
-                        raw_loss, items = compute_loss(output, y, stage=stage.name, active_heads=stage.active_heads or None, event_weight=event_weight)
+                        raw_loss, items = compute_loss(
+                            output, y, stage=stage.name, active_heads=stage.active_heads or None,
+                            label_valid=label_valid, event_weight=event_weight,
+                        )
                     loss = raw_loss / accumulation
                 scaler.scale(loss).backward()
                 running += float(raw_loss.detach().cpu())
@@ -280,9 +313,14 @@ def train(config: dict[str, Any]) -> Path:
                     scaler.update()
                     optimizer.zero_grad(set_to_none=True)
                     optimizer_steps += 1
-            validation = _evaluate(model, valid_loader, device, stage, seed=seed + epoch * 1000, max_batches=next((item.get("eval_max_batches") for item in config.get("stages", []) if item.get("name") == stage.name), None))
+            validation = _evaluate(
+                model, valid_loader, device, stage, seed=seed + epoch * 1000,
+                max_batches=next((item.get("eval_max_batches") for item in config.get("stages", []) if item.get("name") == stage.name), None),
+                event_weight=event_weight,
+            )
             metrics = {"stage": stage.name, "epoch": epoch, "train_loss": running / max(seen, 1), "valid": validation}
-            score = float(validation.get("validation_composite", -validation.get("loss", float("inf"))))
+            selection = select_stage_score(stage.name, validation)
+            score = float(selection.score)
             improved = score > best_score + 1e-8
             if improved:
                 best_score = score
@@ -292,11 +330,11 @@ def train(config: dict[str, Any]) -> Path:
                 stale_epochs += 1
             checkpoint = _save_checkpoint(
                 model, output_root, config, snapshot, dataset_manifest, metrics, stage, epoch,
-                optimizer_steps=optimizer_steps, best_valid=improved, optimizer=optimizer,
+                optimizer_steps=optimizer_steps, best_valid=improved, optimizer=optimizer, selection=selection,
             )
             if improved:
                 best_checkpoint = checkpoint
-            print(json.dumps({"checkpoint": str(checkpoint), **metrics, "optimizer_steps": optimizer_steps}, ensure_ascii=False), flush=True)
+            print(json.dumps({"checkpoint": str(checkpoint), **metrics, "selection_score": score, "best_so_far": improved, "optimizer_steps": optimizer_steps}, ensure_ascii=False), flush=True)
             if stale_epochs >= stage.patience:
                 break
         if best_state is None or best_checkpoint is None:

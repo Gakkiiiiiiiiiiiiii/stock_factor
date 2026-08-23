@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import Any
-
 
 FEATURE_SCHEMA_VERSION = "technical-feature.v2"
 LABEL_SCHEMA_VERSION = "technical-label.v2"
@@ -89,6 +88,32 @@ FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
 
 
 @dataclass(frozen=True)
+class LabelSpec:
+    name: str
+    group: str
+    task_type: str
+    role: str = "CORE_SEQUENCE"
+
+
+def _build_label_specs() -> tuple[LabelSpec, ...]:
+    specs: list[LabelSpec] = []
+    for name in MA_LABELS:
+        task_type = "binary_event" if name.startswith(("bull_cross_", "bear_cross_")) else "regression"
+        specs.append(LabelSpec(name, "ma", task_type, "CORE_SEQUENCE"))
+    specs.extend(LabelSpec(name, "bollinger", "regression", "CORE_SEQUENCE") for name in BOLL_LABELS)
+    auxiliary = {"volume_expansion", "volume_contraction", "demand_pressure_proxy", "supply_pressure_proxy"}
+    for name in WYCKOFF_PRIMITIVE_LABELS:
+        specs.append(LabelSpec(name, "wyckoff_primitives", "regression", "AUXILIARY" if name in auxiliary else "CORE_SEQUENCE"))
+    specs.extend(LabelSpec(name, "phase", "soft_distribution", "CORE_SEQUENCE") for name in PHASE_LABELS)
+    specs.extend(LabelSpec(name, "events", "binary_event", "CORE_SEQUENCE") for name in EVENT_LABELS)
+    return tuple(specs)
+
+
+LABEL_SPECS = _build_label_specs()
+LABEL_SPEC_BY_NAME = {item.name: item for item in LABEL_SPECS}
+
+
+@dataclass(frozen=True)
 class LabelSchema:
     version: str = LABEL_SCHEMA_VERSION
     ma: tuple[str, ...] = tuple(MA_LABELS)
@@ -96,6 +121,16 @@ class LabelSchema:
     wyckoff_primitives: tuple[str, ...] = tuple(WYCKOFF_PRIMITIVE_LABELS)
     phase: tuple[str, ...] = tuple(PHASE_LABELS)
     events: tuple[str, ...] = tuple(EVENT_LABELS)
+
+    @property
+    def specs(self) -> tuple[LabelSpec, ...]:
+        return LABEL_SPECS
+
+    def spec_for(self, name: str) -> LabelSpec:
+        try:
+            return LABEL_SPEC_BY_NAME[name]
+        except KeyError as exc:
+            raise KeyError(f"unknown label: {name}") from exc
 
     @property
     def names(self) -> list[str]:
@@ -124,6 +159,10 @@ class LabelSchema:
                     ("phase", self.phase), ("events", self.events),
                 )
             },
+            "specs": [
+                {"name": item.name, "group": item.group, "task_type": item.task_type, "role": item.role}
+                for item in self.specs
+            ],
         }
 
 

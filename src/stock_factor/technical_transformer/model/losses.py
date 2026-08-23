@@ -10,9 +10,8 @@ def _masked_huber(pred: torch.Tensor, target: torch.Tensor, valid: torch.Tensor 
     if valid is None:
         return F.huber_loss(pred, target, delta=1.0)
     mask = valid.to(dtype=torch.bool)
-    while mask.ndim < pred.ndim:
-        mask = mask.unsqueeze(-1)
-    mask = mask.expand_as(pred)
+    if mask.shape != pred.shape:
+        raise ValueError(f"valid mask shape {tuple(mask.shape)} does not match prediction {tuple(pred.shape)}")
     if not mask.any():
         return pred.sum() * 0.0
     return F.huber_loss(pred[mask], target[mask], delta=1.0)
@@ -21,14 +20,22 @@ def _masked_huber(pred: torch.Tensor, target: torch.Tensor, valid: torch.Tensor 
 def _soft_cross_entropy(logits: torch.Tensor, soft_target: torch.Tensor, valid: torch.Tensor | None = None) -> torch.Tensor:
     values = (-soft_target * F.log_softmax(logits, dim=-1)).sum(dim=-1)
     if valid is not None:
-        values = values[valid.to(dtype=torch.bool)]
+        mask = valid.to(dtype=torch.bool)
+        if mask.ndim == 2:
+            mask = mask.all(dim=-1)
+        values = values[mask]
     return values.mean() if values.numel() else logits.sum() * 0.0
 
 
-def event_pos_weight(labels: torch.Tensor, *, cap: float = 20.0) -> torch.Tensor:
+def event_pos_weight(labels: torch.Tensor, label_valid: torch.Tensor | None = None, *, cap: float = 20.0) -> torch.Tensor:
     """Compute capped negative/positive weights without balancing eval data."""
-    positives = labels.sum(dim=0).clamp_min(1.0)
-    negatives = labels.shape[0] - positives
+    if label_valid is None:
+        label_valid = torch.ones_like(labels, dtype=torch.bool)
+    valid = label_valid.to(dtype=torch.bool)
+    positives = (labels * valid.to(dtype=labels.dtype)).sum(dim=0)
+    observations = valid.sum(dim=0).to(dtype=labels.dtype)
+    negatives = observations - positives
+    positives = positives.clamp_min(1.0)
     return (negatives / positives).clamp(min=1.0, max=float(cap))
 
 
@@ -56,17 +63,25 @@ def compute_loss(
         if active:
             requested &= active
         if "ma" in requested:
-            losses["ma"] = _masked_huber(outputs["ma"], labels[:, slices["ma"]], label_valid)
+            valid = label_valid[:, slices["ma"]] if label_valid is not None else None
+            losses["ma"] = _masked_huber(outputs["ma"], labels[:, slices["ma"]], valid)
         if "bollinger" in requested:
-            losses["bollinger"] = _masked_huber(outputs["bollinger"], labels[:, slices["bollinger"]], label_valid)
+            valid = label_valid[:, slices["bollinger"]] if label_valid is not None else None
+            losses["bollinger"] = _masked_huber(outputs["bollinger"], labels[:, slices["bollinger"]], valid)
         if "wyckoff_primitives" in requested:
-            losses["wyckoff_primitives"] = _masked_huber(outputs["wyckoff_primitives"], labels[:, slices["wyckoff_primitives"]], label_valid)
+            valid = label_valid[:, slices["wyckoff_primitives"]] if label_valid is not None else None
+            losses["wyckoff_primitives"] = _masked_huber(outputs["wyckoff_primitives"], labels[:, slices["wyckoff_primitives"]], valid)
         if "phase" in requested:
-            losses["phase"] = _soft_cross_entropy(outputs["phase"], labels[:, slices["phase"]], label_valid)
+            valid = label_valid[:, slices["phase"]] if label_valid is not None else None
+            losses["phase"] = _soft_cross_entropy(outputs["phase"], labels[:, slices["phase"]], valid)
         if "events" in requested:
-            losses["events"] = F.binary_cross_entropy_with_logits(
-                outputs["events"], labels[:, slices["events"]], pos_weight=event_weight,
+            valid = label_valid[:, slices["events"]] if label_valid is not None else None
+            values = F.binary_cross_entropy_with_logits(
+                outputs["events"], labels[:, slices["events"]], pos_weight=event_weight, reduction="none",
             )
+            if valid is not None:
+                values = values[valid.to(dtype=torch.bool)]
+            losses["events"] = values.mean() if values.numel() else outputs["events"].sum() * 0.0
     weights = {"mask": 1.0, "ma": 1.0, "bollinger": 1.0, "wyckoff_primitives": 1.5, "phase": 0.5, "events": 0.5}
     total = sum((losses[name] * weights[name] for name in losses), outputs[next(iter(outputs))].sum() * 0.0)
     return total, {name: float(value.detach().cpu()) for name, value in losses.items()}

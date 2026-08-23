@@ -72,8 +72,23 @@ Gate may be promoted to ACTIVE:
 
 ```powershell
 & D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.evaluation.run `
+  --mode PRODUCTION `
   --checkpoint artifacts\models\technical_local_v8\<checkpoint> `
   --dataset artifacts\datasets\technical_v2_local `
   --gold-set artifacts\gold_sets\wyckoff_v1 `
+  --baseline-root artifacts\baselines\technical\<checkpoint> `
+  --gate-config configs\technical_reliability_gate_v1.yaml `
   --report artifacts\reports\technical\<checkpoint>
+```
+
+The orchestrator executes frozen split metrics, causality, Gold Set inference,
+fixed-split embedding probes, invariance/occlusion checks and GRU/MLP
+baselines before writing a V2 report. `SMOKE` is never eligible for ACTIVE.
+Promotion is a separate lifecycle action:
+
+```powershell
+& D:\project\quant\.venv\Scripts\python.exe -m stock_factor.technical_transformer.evaluation.promote `
+  --checkpoint artifacts\models\technical_local_v8\<checkpoint> `
+  --report artifacts\reports\technical\<checkpoint>\reliability_report.json `
+  --target ACTIVE
 ```

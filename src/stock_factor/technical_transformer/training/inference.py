@@ -61,7 +61,7 @@ def main() -> None:
     parser.add_argument("--index", type=int, default=0)
     args = parser.parse_args()
     dataset = TechnicalWindowDataset(args.dataset, args.split)
-    window, _labels, metadata = dataset[args.index]
+    window, _labels, _label_valid, metadata = dataset[args.index]
     result = predict(load_checkpoint(args.checkpoint), window)
     result.update({"checkpoint": str(Path(args.checkpoint).resolve()), "sample": metadata})
     print(json.dumps(result, ensure_ascii=False, indent=2))
