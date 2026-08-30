@@ -15,3 +15,6 @@ src/stock_factor/technical_transformer/data/**/__pycache__/
 # Generated datasets, checkpoints, and local test workspaces.
 /artifacts/
 /.pytest-tech-*/
+
+# Codex local run artifacts
+.codex-runs/
