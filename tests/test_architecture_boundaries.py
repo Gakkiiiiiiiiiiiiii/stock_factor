@@ -3,6 +3,7 @@
 stock_factor 只允许通过 HTTP 依赖 quant / stock_content，
 禁止任何 Python import 形式的跨仓依赖。
 """
+
 from __future__ import annotations
 
 import ast

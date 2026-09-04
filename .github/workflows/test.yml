@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -13,11 +16,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[test]"
-      # Ruff 强制失败（禁止 || true）
-      - run: ruff check src tests
+      - run: python -m pip install -e ".[test-core]"
+      - run: python -m ruff check src tests
+      - run: python -m ruff format --check src tests
 
-  unit:
+  core-unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,11 +28,30 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[test]" pytest-cov
-      - run: pytest --cov=stock_factor --cov-report=term-missing --ignore=tests/test_integration.py
+      - run: python -m pip install -e ".[test-core]"
+      # Core tests intentionally exclude the complete ML test directory. No
+      # Torch-dependent test is skipped inside the ML job below.
+      - run: >
+          python -m pytest -q
+          --ignore=tests/technical_transformer
+          --ignore=tests/test_technical_transformer.py
+          --ignore=tests/test_integration.py
+
+  ml-unit-cpu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      # This profile installs Torch explicitly and runs every Transformer test.
+      - run: python -m pip install -e ".[test-ml]"
+      - run: >
+          python -m pytest -q tests/technical_transformer
+          tests/test_technical_transformer.py
 
   research-integrity:
-    # 详细修改方案 §19：研究完整性 Job，失败不允许合并 main
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,10 +59,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[test]"
+      - run: python -m pip install -e ".[test-core]"
       - name: Future leak / timestamp cutoff / OOS authorization / one-shot / multiple testing / replay determinism
         run: >
-          pytest -q tests/test_timestamp_cutoff.py tests/test_final_oos_seal.py
+          python -m pytest -q tests/test_timestamp_cutoff.py tests/test_final_oos_seal.py
           tests/test_research_v2_authority.py tests/test_oos_audit.py
           tests/test_oos_concurrent_consumption.py tests/test_multiple_testing.py
           tests/test_dsr.py tests/test_pbo.py tests/test_metric_scope.py
@@ -55,10 +77,14 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[test]"
+      - run: python -m pip install -e ".[test-core]"
+      - name: Verify formal contract inventory and checksums
+        run: python scripts/contracts/verify_manifest.py
+      - name: Run local consumer-driven contract fixtures
+        run: python -m pytest -q tests/contracts/consumer
       - name: factor.v1 provider contract + architecture boundaries
         run: >
-          pytest -q tests/test_alpha_score_contract.py tests/test_api.py
+          python -m pytest -q tests/test_alpha_score_contract.py tests/test_api.py
           tests/test_remote_market_contract.py tests/test_architecture.py
           tests/test_architecture_boundaries.py tests/test_paper_runtime_authority.py
 
@@ -70,15 +96,47 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[test]"
-      - run: pytest -q tests/test_integration.py
+      - run: python -m pip install -e ".[test-core]"
+      - run: python -m pytest -q tests/test_integration.py
 
   docker-build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [core, worker, ml-cpu, ml-gpu]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
+          target: ${{ matrix.target }}
           push: false
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify offline locks and SBOM
+        run: python scripts/verify_supply_chain.py
+
+  benchmark-performance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install ML benchmark profile
+        run: |
+          python -m pip install -e ".[test-ml]" --no-deps
+          grep -v -E '^torch==' locks/ml-cpu.lock > /tmp/ml-cpu.lock
+          python -m pip install --no-deps -r /tmp/ml-cpu.lock
+          python -m pip install --no-deps --index-url https://download.pytorch.org/whl/cpu torch==2.11.0+cpu
+          python -m pip check
+      - name: Run deterministic production-path benchmark check
+        run: python scripts/run_benchmarks.py --check

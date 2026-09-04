@@ -4,6 +4,7 @@
 - 研究代理收益字段不得使用权威回测命名；
 - Factor API 禁止输出 backtest_return / strategy_return / portfolio_return。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -37,7 +38,9 @@ def test_fitness_metrics_never_use_authoritative_names():
     for start, end in ((0, 100), (10, 110)):
         metrics = evaluate_factor_range(factor, closes, start, end, horizon=5)
         for forbidden in FORBIDDEN_AUTHORITY_FIELDS + (
-            "topk_annual_return", "benchmark_annual_return", "topk_excess_annual_return",
+            "topk_annual_return",
+            "benchmark_annual_return",
+            "topk_excess_annual_return",
         ):
             assert forbidden not in metrics
 

@@ -37,9 +37,12 @@ class SplitConfig:
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> "SplitConfig":
         return cls(
-            train_start=str(value["train_start"]), train_end=str(value["train_end"]),
-            valid_start=str(value["valid_start"]), valid_end=str(value["valid_end"]),
-            test_start=str(value["test_start"]), test_end=str(value["test_end"]),
+            train_start=str(value["train_start"]),
+            train_end=str(value["train_end"]),
+            valid_start=str(value["valid_start"]),
+            valid_end=str(value["valid_end"]),
+            test_start=str(value["test_start"]),
+            test_end=str(value["test_end"]),
             gap_days=int(value.get("gap_days", 40)),
         )
 
@@ -78,7 +81,8 @@ class DatasetConfig:
     def from_mapping(cls, value: dict[str, Any]) -> "DatasetConfig":
         split = value.get("split") or value.get("splits")
         return cls(
-            step_len=int(value.get("step_len", 128)), stride=int(value.get("stride", 5)),
+            step_len=int(value.get("step_len", 128)),
+            stride=int(value.get("stride", 5)),
             min_listing_days=int(value.get("min_listing_days", 160)),
             min_quality_ratio=float(value.get("min_quality_ratio", 0.80)),
             max_symbols=int(value["max_symbols"]) if value.get("max_symbols") else None,
@@ -87,7 +91,10 @@ class DatasetConfig:
             split=SplitConfig.from_mapping(split) if split else None,
             holdout_ratio=float(value.get("holdout_ratio", 0.20)),
             symbol_split_seed=int(value.get("symbol_split_seed", 42)),
-            stratify_fields=tuple(str(item) for item in value.get("stratify_fields", ("board", "industry", "market_cap_bucket", "liquidity_bucket"))),
+            stratify_fields=tuple(
+                str(item)
+                for item in value.get("stratify_fields", ("board", "industry", "market_cap_bucket", "liquidity_bucket"))
+            ),
         )
 
 
@@ -115,7 +122,12 @@ def deterministic_symbol_split(
         meta = metadata.drop_duplicates("symbol").set_index("symbol")
         for symbol in unique:
             if symbol in meta.index:
-                rows[symbol] = tuple(str(meta.loc[symbol, field]) if field in available and pd.notna(meta.loc[symbol, field]) else "UNKNOWN" for field in stratify_fields)
+                rows[symbol] = tuple(
+                    str(meta.loc[symbol, field])
+                    if field in available and pd.notna(meta.loc[symbol, field])
+                    else "UNKNOWN"
+                    for field in stratify_fields
+                )
     groups: dict[tuple[str, ...], list[str]] = {}
     for symbol in unique:
         groups.setdefault(rows.get(symbol, ()), []).append(symbol)
@@ -134,7 +146,9 @@ def deterministic_symbol_split(
     if len(holdout) >= len(unique):
         holdout = holdout[:-1]
     holdout_set = set(holdout)
-    return [symbol for symbol in unique if symbol not in holdout_set], [symbol for symbol in unique if symbol in holdout_set]
+    return [symbol for symbol in unique if symbol not in holdout_set], [
+        symbol for symbol in unique if symbol in holdout_set
+    ]
 
 
 def symbol_hash(symbols: list[str] | tuple[str, ...]) -> str:
@@ -191,8 +205,14 @@ class RobustFeatureProcessor:
     def as_dict(self) -> dict[str, Any]:
         if self.median is None or self.scale is None:
             raise RuntimeError("processor has not been fit")
-        return {"fit_scope": "train", "method": "median_mad", "clip": self.clip,
-                "features": CONTINUOUS_FEATURES, "median": self.median.tolist(), "scale": self.scale.tolist()}
+        return {
+            "fit_scope": "train",
+            "method": "median_mad",
+            "clip": self.clip,
+            "features": CONTINUOUS_FEATURES,
+            "median": self.median.tolist(),
+            "scale": self.scale.tolist(),
+        }
 
 
 def _split_for_date(as_of: pd.Timestamp, split: SplitConfig | None) -> str | None:
@@ -228,17 +248,21 @@ def _eligible_samples(
                 continue
             if float(quality[position]) <= 0.0:
                 continue
-            quality_ratio = float(np.mean(quality[window_start:position + 1]))
+            quality_ratio = float(np.mean(quality[window_start : position + 1]))
             if quality_ratio < config.min_quality_ratio:
                 continue
             previous = last_position.get(split_name)
             if previous is not None and position - previous < config.stride:
                 continue
-            samples.append({
-                "end_index": int(position), "start_index": int(window_start),
-                "as_of": dates.iloc[position].date().isoformat(), "split": split_name,
-                "quality_ratio": quality_ratio,
-            })
+            samples.append(
+                {
+                    "end_index": int(position),
+                    "start_index": int(window_start),
+                    "as_of": dates.iloc[position].date().isoformat(),
+                    "split": split_name,
+                    "quality_ratio": quality_ratio,
+                }
+            )
             last_position[split_name] = position
     return samples
 
@@ -269,16 +293,20 @@ def _eligible_samples_for_range(
             continue
         if float(quality[position]) <= 0.0:
             continue
-        quality_ratio = float(np.mean(quality[window_start:position + 1]))
+        quality_ratio = float(np.mean(quality[window_start : position + 1]))
         if quality_ratio < config.min_quality_ratio:
             continue
         if last_position is not None and position - last_position < config.stride:
             continue
-        samples.append({
-            "end_index": int(position), "start_index": int(window_start),
-            "as_of": dates.iloc[position].date().isoformat(), "split": split_name,
-            "quality_ratio": quality_ratio,
-        })
+        samples.append(
+            {
+                "end_index": int(position),
+                "start_index": int(window_start),
+                "as_of": dates.iloc[position].date().isoformat(),
+                "split": split_name,
+                "quality_ratio": quality_ratio,
+            }
+        )
         last_position = position
     return samples
 
@@ -292,7 +320,8 @@ def _write_qlib_compatible_layout(path: Path, series_meta: list[dict[str, Any]],
     (path / "instruments" / "all.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (path / "README.txt").write_text(
         "Technical Transformer Qlib-compatible calendar/instrument layout. "
-        "Windows are served by TSDatasetHAdapter from immutable NPZ series.\n", encoding="utf-8"
+        "Windows are served by TSDatasetHAdapter from immutable NPZ series.\n",
+        encoding="utf-8",
     )
 
 
@@ -323,8 +352,14 @@ def _dump_native_qlib_provider(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     dumper = module.DumpDataAll(
-        data_path=str(source_dir), qlib_dir=str(provider_path), freq="day", max_workers=1,
-        date_field_name="date", file_suffix=".parquet", symbol_field_name="symbol", exclude_fields="symbol",
+        data_path=str(source_dir),
+        qlib_dir=str(provider_path),
+        freq="day",
+        max_workers=1,
+        date_field_name="date",
+        file_suffix=".parquet",
+        symbol_field_name="symbol",
+        exclude_fields="symbol",
     )
     all_datetime: set[Any] = set()
     date_range_list: list[str] = []
@@ -332,10 +367,15 @@ def _dump_native_qlib_provider(
         (begin_time, end_time), calendar_set = dumper._get_date(file_path, as_set=True, is_begin_end=True)
         all_datetime |= calendar_set
         if pd.notna(begin_time) and pd.notna(end_time):
-            date_range_list.append(dumper.INSTRUMENTS_SEP.join([
-                dumper.get_symbol_from_file(file_path).upper(),
-                dumper._format_datetime(begin_time), dumper._format_datetime(end_time),
-            ]))
+            date_range_list.append(
+                dumper.INSTRUMENTS_SEP.join(
+                    [
+                        dumper.get_symbol_from_file(file_path).upper(),
+                        dumper._format_datetime(begin_time),
+                        dumper._format_datetime(end_time),
+                    ]
+                )
+            )
     dumper._calendars_list = sorted(map(pd.Timestamp, all_datetime))
     dumper.save_calendars(dumper._calendars_list)
     dumper.save_instruments(date_range_list)
@@ -354,8 +394,13 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
     if output.exists() and (output / "dataset_manifest.json").exists():
         existing = json.loads((output / "dataset_manifest.json").read_text(encoding="utf-8"))
         if existing.get("source_market_snapshot_id") == snapshot.snapshot_id:
-            if existing.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"] or existing.get("label_schema_version") != LABEL_SCHEMA.version:
-                raise RuntimeError(f"dataset directory is sealed with an older schema; choose a new V2 output directory: {output}")
+            if (
+                existing.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"]
+                or existing.get("label_schema_version") != LABEL_SCHEMA.version
+            ):
+                raise RuntimeError(
+                    f"dataset directory is sealed with an older schema; choose a new V2 output directory: {output}"
+                )
             series_path = output / "series"
             legacy_series = next(series_path.glob("*.npz"), None) if series_path.exists() else None
             if legacy_series is not None and "label_valid" not in np.load(legacy_series).files:
@@ -367,13 +412,23 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
     frame = snapshot.frame.copy()
     symbols = sorted(frame["symbol"].astype(str).unique().tolist())
     if config.max_symbols:
-        symbols = symbols[:config.max_symbols]
+        symbols = sorted(
+            symbols,
+            key=lambda symbol: hashlib.sha256(f"{config.symbol_split_seed}:{symbol}".encode()).hexdigest(),
+        )[: config.max_symbols]
     frame = frame[frame["symbol"].isin(symbols)].sort_values(["symbol", "trading_date"])
     split = config.split
     metadata_columns = ["symbol", *config.stratify_fields]
-    metadata = frame[[column for column in metadata_columns if column in frame.columns]].drop_duplicates("symbol") if "symbol" in frame else None
+    metadata = (
+        frame[[column for column in metadata_columns if column in frame.columns]].drop_duplicates("symbol")
+        if "symbol" in frame
+        else None
+    )
     train_symbols, holdout_symbols = deterministic_symbol_split(
-        symbols, metadata, holdout_ratio=config.holdout_ratio, seed=config.symbol_split_seed,
+        symbols,
+        metadata,
+        holdout_ratio=config.holdout_ratio,
+        seed=config.symbol_split_seed,
         stratify_fields=config.stratify_fields,
     )
     holdout_set = set(holdout_symbols)
@@ -396,10 +451,14 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
         listing = group["listing_days"] if "listing_days" in group else pd.Series(np.arange(1, len(group) + 1))
         train_positions = list(range(len(group)))
         if train_range:
-            train_positions = [i for i, item in enumerate(group["trading_date"]) if train_range[0] <= item <= train_range[1]]
+            train_positions = [
+                i for i, item in enumerate(group["trading_date"]) if train_range[0] <= item <= train_range[1]
+            ]
         if symbol not in holdout_set and train_positions:
             sample_count = min(len(train_positions), max(config.fit_sample_per_symbol, 1))
-            positions = [train_positions[index] for index in np.linspace(0, len(train_positions) - 1, sample_count, dtype=int)]
+            positions = [
+                train_positions[index] for index in np.linspace(0, len(train_positions) - 1, sample_count, dtype=int)
+            ]
             fit_values = features.iloc[positions][CONTINUOUS_FEATURES].to_numpy(dtype=np.float32)
             required_indices = [CONTINUOUS_FEATURES.index(name) for name in required_features]
             finite = np.isfinite(fit_values[:, required_indices]).all(axis=1)
@@ -418,15 +477,21 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
     with samples_path.open("w", encoding="utf-8") as sample_file:
         for symbol, group, features, labels in cached:
             transformed = features.copy()
-            transformed[CONTINUOUS_FEATURES] = processor.transform(features[CONTINUOUS_FEATURES].to_numpy(dtype=np.float32))
+            transformed[CONTINUOUS_FEATURES] = processor.transform(
+                features[CONTINUOUS_FEATURES].to_numpy(dtype=np.float32)
+            )
             transformed[STATE_FEATURES] = features[STATE_FEATURES].fillna(0.0).to_numpy(dtype=np.float32)
             x = transformed[FEATURE_NAMES].to_numpy(dtype=np.float32)
             y = labels.values[LABEL_SCHEMA.names].to_numpy(dtype=np.float32)
             label_valid = labels.valid[LABEL_SCHEMA.names].to_numpy(dtype=np.uint8)
             quality = transformed["quality_mask"].to_numpy(dtype=np.float32)
             np.savez_compressed(
-                series_dir / f"{symbol}.npz", dates=group["trading_date"].astype("int64").to_numpy(),
-                features=x, labels=y, label_valid=label_valid, quality=quality,
+                series_dir / f"{symbol}.npz",
+                dates=group["trading_date"].astype("int64").to_numpy(),
+                features=x,
+                labels=y,
+                label_valid=label_valid,
+                quality=quality,
             )
             listing = group["listing_days"] if "listing_days" in group else pd.Series(np.arange(1, len(group) + 1))
             symbol_records: list[dict[str, Any]] = []
@@ -438,59 +503,130 @@ def build_dataset(snapshot: QuantSnapshot, output_dir: str | Path, config: Datas
                     symbol_records.append(item)
             elif ranges:
                 if "valid" in ranges:
-                    symbol_records.extend(_eligible_samples_for_range(group["trading_date"], listing, quality, config, *ranges["valid"], "instrument_test"))
+                    symbol_records.extend(
+                        _eligible_samples_for_range(
+                            group["trading_date"], listing, quality, config, *ranges["valid"], "instrument_test"
+                        )
+                    )
                 if "test" in ranges:
-                    symbol_records.extend(_eligible_samples_for_range(group["trading_date"], listing, quality, config, *ranges["test"], "double_oos"))
+                    symbol_records.extend(
+                        _eligible_samples_for_range(
+                            group["trading_date"], listing, quality, config, *ranges["test"], "double_oos"
+                        )
+                    )
             for item in symbol_records:
                 item["symbol"] = symbol
                 all_records.append(item)
                 sample_file.write(json.dumps(item, ensure_ascii=False) + "\n")
                 sample_count[item["split"]] += 1
-            series_meta.append({"symbol": symbol, "min_date": str(group["trading_date"].min().date()), "max_date": str(group["trading_date"].max().date()), "rows": len(group), "symbol_role": "holdout" if symbol in holdout_set else "train"})
+            series_meta.append(
+                {
+                    "symbol": symbol,
+                    "min_date": str(group["trading_date"].min().date()),
+                    "max_date": str(group["trading_date"].max().date()),
+                    "rows": len(group),
+                    "symbol_role": "holdout" if symbol in holdout_set else "train",
+                }
+            )
     assert_split_disjoint(all_records)
     qlib_provider = output / "qlib_provider"
     _write_qlib_compatible_layout(qlib_provider, series_meta, all_dates)
     native_qlib_version = _dump_native_qlib_provider(qlib_provider, config.qlib_source_path, cached)
     try:
         from ..evaluation.leakage import audit_shortcut_leakage
+
+        # The pairwise shortcut audit is intentionally exhaustive for small
+        # datasets, but running thousands of regressions over every row of the
+        # full research universe is needlessly expensive.  A fixed, evenly
+        # spaced sample preserves deterministic detection of direct/affine
+        # shortcuts while keeping dataset sealing bounded in time and memory.
+        audit_row_limit = 10_000
+        total_audit_rows = sum(len(feats) for _symbol, _group, feats, _labs in cached)
+        audit_row_count = min(total_audit_rows, audit_row_limit)
+        audit_positions = np.linspace(0, max(total_audit_rows - 1, 0), audit_row_count, dtype=np.int64)
         audit_parts = []
         label_parts = []
+        offset = 0
         for _symbol, _group, feats, labs in cached:
-            audit_parts.append(feats[FEATURE_NAMES].replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=np.float32))
-            label_parts.append(labs[LABEL_SCHEMA.names].to_numpy(dtype=np.float32))
-        leakage_audit = audit_shortcut_leakage(np.concatenate(audit_parts), np.concatenate(label_parts), FEATURE_NAMES, LABEL_SCHEMA.names)
+            end = offset + len(feats)
+            local = audit_positions[(audit_positions >= offset) & (audit_positions < end)] - offset
+            if len(local):
+                audit_parts.append(
+                    feats.iloc[local][FEATURE_NAMES]
+                    .replace([np.inf, -np.inf], np.nan)
+                    .fillna(0.0)
+                    .to_numpy(dtype=np.float32)
+                )
+                label_parts.append(labs.iloc[local][LABEL_SCHEMA.names].to_numpy(dtype=np.float32))
+            offset = end
+        leakage_audit = audit_shortcut_leakage(
+            np.concatenate(audit_parts), np.concatenate(label_parts), FEATURE_NAMES, LABEL_SCHEMA.names
+        )
+        leakage_audit_sample_count = int(audit_row_count)
+        leakage_audit_sampling = "full" if total_audit_rows <= audit_row_limit else "deterministic_uniform_rows"
     except Exception as exc:
         leakage_audit = {"passed": False, "violations": [{"type": "audit_error", "message": str(exc)}]}
+        leakage_audit_sample_count = 0
+        leakage_audit_sampling = "error"
     dataset_manifest = {
-        "schema_version": "technical-dataset.v2", "dataset_id": output.name,
-        "source_market_snapshot_id": snapshot.snapshot_id, "source_market_snapshot_path": str(snapshot.bars_path.resolve()),
+        "schema_version": "technical-dataset.v2",
+        "dataset_id": output.name,
+        "source_market_snapshot_id": snapshot.snapshot_id,
+        "source_market_snapshot_path": str(snapshot.bars_path.resolve()),
         "source_data_version": snapshot.manifest.get("data_version"),
-        "adjustment": snapshot.manifest.get("adjustment"), "frequency": snapshot.manifest.get("frequency"),
+        "adjustment": snapshot.manifest.get("adjustment"),
+        "frequency": snapshot.manifest.get("frequency"),
         "symbols_hash": symbol_hash(symbols),
         "schema_hash": schema_hash({"features": FEATURE_SCHEMA, "labels": LABEL_SCHEMA.as_dict()}),
-        "feature_schema_hash": schema_hash(FEATURE_SCHEMA), "label_schema_hash": schema_hash(LABEL_SCHEMA.as_dict()),
-        "feature_schema_version": FEATURE_SCHEMA["schema_version"], "label_schema_version": LABEL_SCHEMA.version,
-        "feature_dimensions": len(FEATURE_NAMES), "label_dimensions": len(LABEL_SCHEMA.names),
-        "step_len": config.step_len, "stride": config.stride, "min_listing_days": config.min_listing_days,
-        "row_count": int(len(frame)), "symbol_count": len(symbols),
-        "min_date": str(frame["trading_date"].min().date()), "max_date": str(frame["trading_date"].max().date()),
-        "qlib_provider_path": str(qlib_provider.resolve()), "qlib_version": native_qlib_version,
-        "samples_path": str(samples_path.resolve()), "series_path": str(series_dir.resolve()),
-        "sample_counts": sample_count, "processor": processor.as_dict(),
+        "feature_schema_hash": schema_hash(FEATURE_SCHEMA),
+        "label_schema_hash": schema_hash(LABEL_SCHEMA.as_dict()),
+        "feature_schema_version": FEATURE_SCHEMA["schema_version"],
+        "label_schema_version": LABEL_SCHEMA.version,
+        "feature_dimensions": len(FEATURE_NAMES),
+        "label_dimensions": len(LABEL_SCHEMA.names),
+        "step_len": config.step_len,
+        "stride": config.stride,
+        "min_listing_days": config.min_listing_days,
+        "row_count": int(len(frame)),
+        "symbol_count": len(symbols),
+        "min_date": str(frame["trading_date"].min().date()),
+        "max_date": str(frame["trading_date"].max().date()),
+        "qlib_provider_path": str(qlib_provider.resolve()),
+        "qlib_version": native_qlib_version,
+        "samples_path": str(samples_path.resolve()),
+        "series_path": str(series_dir.resolve()),
+        "sample_counts": sample_count,
+        "processor": processor.as_dict(),
         "split": config.split.__dict__ if config.split else None,
         "symbol_split": {
-            "holdout_ratio": config.holdout_ratio, "seed": config.symbol_split_seed,
-            "train_symbols_hash": symbol_hash(train_symbols), "holdout_symbols_hash": symbol_hash(holdout_symbols),
-            "train_symbol_count": len(train_symbols), "holdout_symbol_count": len(holdout_symbols),
+            "holdout_ratio": config.holdout_ratio,
+            "seed": config.symbol_split_seed,
+            "train_symbols_hash": symbol_hash(train_symbols),
+            "holdout_symbols_hash": symbol_hash(holdout_symbols),
+            "train_symbol_count": len(train_symbols),
+            "holdout_symbol_count": len(holdout_symbols),
         },
-        "leakage_audit": {"passed": bool(leakage_audit.get("passed")), "violations": leakage_audit.get("violations", [])},
+        "leakage_audit": {
+            "passed": bool(leakage_audit.get("passed")),
+            "violations": leakage_audit.get("violations", []),
+        },
+        "leakage_audit_sample_count": leakage_audit_sample_count,
+        "leakage_audit_sampling": leakage_audit_sampling,
         "split_overlap": 0,
         "created_at": pd.Timestamp.utcnow().isoformat(),
     }
-    (output / "feature_schema.json").write_text(json.dumps(FEATURE_SCHEMA, ensure_ascii=False, indent=2), encoding="utf-8")
-    (output / "label_schema.json").write_text(json.dumps(LABEL_SCHEMA.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-    (output / "processor.json").write_text(json.dumps(processor.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-    (output / "dataset_manifest.json").write_text(json.dumps(dataset_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output / "feature_schema.json").write_text(
+        json.dumps(FEATURE_SCHEMA, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output / "label_schema.json").write_text(
+        json.dumps(LABEL_SCHEMA.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output / "processor.json").write_text(
+        json.dumps(processor.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output / "dataset_manifest.json").write_text(
+        json.dumps(dataset_manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return dataset_manifest
 
 
@@ -507,7 +643,11 @@ class TSDatasetHAdapter:
         self.dataset_dir = Path(dataset_dir)
         self.step_len = 128
         self.split = canonical_split_name(split)
-        self.records = [json.loads(line) for line in (self.dataset_dir / "samples.jsonl").read_text(encoding="utf-8").splitlines() if line]
+        self.records = [
+            json.loads(line)
+            for line in (self.dataset_dir / "samples.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
+        ]
         self.records = [item for item in self.records if canonical_split_name(str(item["split"])) == self.split]
         self._cache: dict[str, dict[str, np.ndarray]] = {}
 

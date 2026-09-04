@@ -1,0 +1,28 @@
+{
+  "producer": "stock_factor",
+  "consumer": "stock_agent",
+  "request": {"contract_version": "model-artifact.v1", "model_id": "model-fixture"},
+  "response": {
+    "contract_version": "model-artifact.v1",
+    "model_id": "model-fixture",
+    "artifact_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "record_id": "sha256:0c4b713a02ab65f69a3b654578fae7011df8986b04ae377ee67bf8015a653941",
+    "checkpoint_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "feature_schema_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "label_schema_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "training_snapshot_id": "snapshot-fixture",
+    "split_manifest_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "reliability_report_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "dependency_lock_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+    "hardware_profile": {"device": "cpu"},
+    "determinism_profile": {"seed": 42, "deterministic_algorithms": true, "tolerance_abs": 0.000001, "tolerance_rel": 0.00001},
+    "model_artifact_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "model_version": "technical-transformer.v1",
+    "status": "SEALED",
+    "producer": "stock_factor",
+    "created_at": "2026-08-10T00:00:00Z",
+    "reliability_seal": {"status": "PASS", "mode": "PRODUCTION"},
+    "reliability_gate": {"passed": true}
+  }
+}

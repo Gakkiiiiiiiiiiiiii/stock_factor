@@ -1,0 +1,22 @@
+schema_version: config-artifact.v1
+config_id: tradability_v1
+checksum: sha256:a1e36e679241c65d5ed94cb7dc24f60db8dd9141f35c4bf9344863ed75c794b8
+environment: shared
+
+policy_version: tradability_v1
+assessment_version: tradability_assessment_v1
+report_only: false
+annualization_days: 250
+limits:
+  max_limit_hit_rate: 0.05
+  max_halt_exposure: 0.05
+  max_participation_rate: 0.25
+  max_turnover: 0.80
+  min_average_daily_amount: 1000000.0
+  min_net_annualized_return: 0.0
+assumptions:
+  rebalance: DAILY
+  horizon_days: 1
+  rounding: NEAREST_SHARE
+  cash_assumption: FULLY_INVESTED_WITH_RESIDUAL_CASH
+  fillability: NEXT_OPEN_IF_TRADABLE

@@ -3,6 +3,7 @@
 Promotion Gate 不能只看 overall IC/ICIR：
 必须给出 Subperiod / Regime 稳定性与符号一致性。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -97,13 +98,21 @@ def factor_stability_report(
             if mask.any():
                 regime_metrics[regime] = _summarize([float(item) for item in ic_array[mask]])
 
-    worst = float(min(regime_metrics.values(), key=lambda item: item["ic_mean"])["ic_mean"]) if regime_metrics else (
-        float(ic_array.min()) if days else 0.0
+    worst = (
+        float(min(regime_metrics.values(), key=lambda item: item["ic_mean"])["ic_mean"])
+        if regime_metrics
+        else (float(ic_array.min()) if days else 0.0)
     )
-    consistency = float(np.mean(np.sign(ic_array) == np.sign(np.mean(ic_array)))) if days and abs(float(np.mean(ic_array))) > 1e-9 else 0.0
+    consistency = (
+        float(np.mean(np.sign(ic_array) == np.sign(np.mean(ic_array))))
+        if days and abs(float(np.mean(ic_array))) > 1e-9
+        else 0.0
+    )
 
     # Rank stability：相邻评估日 top 分位成员重合度的代理（IC 自相关）。
-    rank_stability = float(np.corrcoef(ic_array[:-1], ic_array[1:])[0, 1]) if days > 2 and np.std(ic_array) > 1e-12 else 0.0
+    rank_stability = (
+        float(np.corrcoef(ic_array[:-1], ic_array[1:])[0, 1]) if days > 2 and np.std(ic_array) > 1e-12 else 0.0
+    )
 
     return FactorStabilityReport(
         regime_metrics=regime_metrics,

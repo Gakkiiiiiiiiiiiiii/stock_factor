@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "paper-account.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "account_id", "authority", "account_type", "as_of", "equity", "positions", "orders"],
+  "properties": {
+    "contract_version": {"const": "paper-account.v1"},
+    "account_id": {"type": "string", "minLength": 1},
+    "authority": {"const": "quant"},
+    "account_type": {"const": "PAPER"},
+    "as_of": {"type": "string", "format": "date-time"},
+    "equity": {"type": "number"},
+    "positions": {"type": "array"},
+    "orders": {"type": "array"}
+  }
+}

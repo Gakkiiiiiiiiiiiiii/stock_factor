@@ -1,0 +1,64 @@
+project:
+  name: technical-transformer-r1-800
+
+source:
+  authority: quant
+  contract: market-data.v1
+  snapshot_root: D:/project/quant/data/market_snapshots
+  market_snapshot_id: mds-aab5b6aa65b074bba889df04edacb7f7ce7801159140ed8273e3b51207b41e78
+  adjustment: qfq
+  frequency: 1d
+
+dataset:
+  path: artifacts/datasets/technical_v2_r1_800
+  step_len: 128
+  stride: 5
+  min_listing_days: 160
+  min_quality_ratio: 0.80
+  max_symbols: 800
+  fit_sample_per_symbol: 512
+  holdout_ratio: 0.20
+  symbol_split_seed: 42
+  stratify_fields: [board, industry, market_cap_bucket, liquidity_bucket]
+  qlib_source_path: D:/project/quant/runtime/qlib_source
+  split:
+    train_start: 2023-01-03
+    train_end: 2024-06-28
+    valid_start: 2024-09-02
+    valid_end: 2025-03-31
+    test_start: 2025-06-02
+    test_end: 2026-03-25
+    gap_days: 40
+
+features: {schema: technical-feature.v2, dimensions: 51}
+labels: {schema: technical-label.v2}
+
+model:
+  input_dim: 51
+  sequence_length: 128
+  hidden_size: 384
+  layers: 6
+  heads: 8
+  ffn_size: 1536
+  dropout: 0.10
+  embedding_dim: 256
+
+training:
+  seed: 42
+  precision: fp16
+  batch_size: 32
+  gradient_accumulation: 2
+  effective_batch_size: 64
+  num_workers: 2
+  weight_decay: 0.01
+  grad_clip: 1.0
+  run_stages: [masked_pretraining, ma_bollinger, wyckoff_primitives, wyckoff_phase_events]
+
+stages:
+  - {name: masked_pretraining, epochs: 6, encoder_lr: 0.0003, head_lr: 0.0003, mask_mode: mixed, patience: 3, max_steps_per_epoch: null}
+  - {name: ma_bollinger, epochs: 10, encoder_lr: 0.0001, head_lr: 0.0001, active_heads: [ma, bollinger], patience: 3, max_steps_per_epoch: null}
+  - {name: wyckoff_primitives, epochs: 10, encoder_lr: 0.00005, head_lr: 0.0001, active_heads: [ma, bollinger, wyckoff_primitives], patience: 3, max_steps_per_epoch: null}
+  - {name: wyckoff_phase_events, epochs: 10, encoder_lr: 0.00002, head_lr: 0.0001, active_heads: [ma, bollinger, wyckoff_primitives, phase, events], patience: 3, max_steps_per_epoch: null}
+
+hardware: {device: auto, gpu: RTX_4060_Ti_8GB, ram_gb: 32}
+checkpoint: {root: artifacts/models/technical_r1_800}

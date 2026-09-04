@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol
 
+from stock_factor.domain.content_signal_v5 import FormalContentQuery, FormalContentRef
 from stock_factor.domain.factor import FactorDefinition, FactorJob
 from stock_factor.domain.market import MarketDataSnapshot
+from stock_factor.domain.market_dataset_ref import FormalMarketDatasetRef
 
 
 class MarketDataProvider(Protocol):
-    def get_daily_bars(self, symbols: list[str], start: str, end: str, adjust: str) -> MarketDataSnapshot: ...
+    def get_daily_bars(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        adjust: str,
+        *,
+        formal_market_ref: FormalMarketDatasetRef | None = None,
+        expected_ref: FormalMarketDatasetRef | None = None,
+        as_of: datetime | None = None,
+    ) -> MarketDataSnapshot: ...
 
 
 class ContentSignalProvider(Protocol):
-    def load_signals(self, symbols: list[str], start: str, end: str) -> list[dict]: ...
+    def load_signals(
+        self,
+        symbols: list[str],
+        start: str,
+        end: str,
+        *,
+        query: FormalContentQuery | None = None,
+        expected_ref: FormalContentRef | None = None,
+    ) -> list[dict]: ...
 
 
 class ModelClient(Protocol):

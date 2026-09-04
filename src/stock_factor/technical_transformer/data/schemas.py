@@ -12,49 +12,121 @@ LABEL_SCHEMA_VERSION = "technical-label.v2"
 # These three features are algebraically equivalent to MA targets and are
 # intentionally excluded from V2 to remove the shortcut path.
 CONTINUOUS_FEATURES = [
-    "ret_1", "ret_3", "ret_5", "ret_10",
-    "open_prev_close", "high_prev_close", "low_prev_close", "close_prev_close",
-    "intraday_range_prev_close", "intraday_body_prev_close", "body_ratio",
-    "upper_shadow_ratio", "lower_shadow_ratio", "range_position", "gap_ratio",
-    "log1p_volume", "volume_ratio_5", "volume_ratio_10", "volume_ratio_20", "volume_ratio_60",
-    "volume_zscore_20", "volume_zscore_60", "volume_change_1", "volume_change_5",
-    "amount_ratio_5", "amount_ratio_20", "turnover", "turnover_ratio_5",
-    "turnover_ratio_20", "turnover_zscore_20", "true_range_close", "atr14_close",
-    "realized_vol_5", "realized_vol_20", "realized_vol_60", "range_atr14",
+    "ret_1",
+    "ret_3",
+    "ret_5",
+    "ret_10",
+    "open_prev_close",
+    "high_prev_close",
+    "low_prev_close",
+    "close_prev_close",
+    "intraday_range_prev_close",
+    "intraday_body_prev_close",
+    "body_ratio",
+    "upper_shadow_ratio",
+    "lower_shadow_ratio",
+    "range_position",
+    "gap_ratio",
+    "log1p_volume",
+    "volume_ratio_5",
+    "volume_ratio_10",
+    "volume_ratio_20",
+    "volume_ratio_60",
+    "volume_zscore_20",
+    "volume_zscore_60",
+    "volume_change_1",
+    "volume_change_5",
+    "amount_ratio_5",
+    "amount_ratio_20",
+    "turnover",
+    "turnover_ratio_5",
+    "turnover_ratio_20",
+    "turnover_zscore_20",
+    "true_range_close",
+    "atr14_close",
+    "realized_vol_5",
+    "realized_vol_20",
+    "realized_vol_60",
+    "range_atr14",
 ]
 
 STATE_FEATURES = [
-    "is_suspended", "is_st", "is_star_st", "is_delisting",
-    "is_limit_up", "is_limit_down",
-    "st_observed", "suspension_observed", "limit_observed", "delisting_observed",
-    "turnover_observed", "price_observed", "volume_observed",
-    "listing_days_norm", "quality_mask",
+    "is_suspended",
+    "is_st",
+    "is_star_st",
+    "is_delisting",
+    "is_limit_up",
+    "is_limit_down",
+    "st_observed",
+    "suspension_observed",
+    "limit_observed",
+    "delisting_observed",
+    "turnover_observed",
+    "price_observed",
+    "volume_observed",
+    "listing_days_norm",
+    "quality_mask",
 ]
 
 FEATURE_NAMES = CONTINUOUS_FEATURES + STATE_FEATURES
 
 MA_LABELS = [
-    "ma5_slope", "ma10_slope", "ma20_slope", "ma30_slope", "ma60_slope", "ma120_slope",
-    "close_ma5_distance", "close_ma20_distance", "close_ma60_distance", "close_ma120_distance",
-    "bull_alignment_score", "bear_alignment_score", "ma_trend_strength",
-    "compression_score", "ma_expansion_score",
-    "bull_cross_5_20", "bear_cross_5_20", "bull_cross_10_20", "bear_cross_10_20",
-    "bull_cross_20_60", "bear_cross_20_60",
-    "days_since_bull_cross_5_20", "days_since_bear_cross_5_20",
-    "days_since_bull_cross_20_60", "days_since_bear_cross_20_60",
+    "ma5_slope",
+    "ma10_slope",
+    "ma20_slope",
+    "ma30_slope",
+    "ma60_slope",
+    "ma120_slope",
+    "close_ma5_distance",
+    "close_ma20_distance",
+    "close_ma60_distance",
+    "close_ma120_distance",
+    "bull_alignment_score",
+    "bear_alignment_score",
+    "ma_trend_strength",
+    "compression_score",
+    "ma_expansion_score",
+    "bull_cross_5_20",
+    "bear_cross_5_20",
+    "bull_cross_10_20",
+    "bear_cross_10_20",
+    "bull_cross_20_60",
+    "bear_cross_20_60",
+    "days_since_bull_cross_5_20",
+    "days_since_bear_cross_5_20",
+    "days_since_bull_cross_20_60",
+    "days_since_bear_cross_20_60",
 ]
 
 BOLL_LABELS = [
-    "percent_b", "boll_zscore", "bandwidth", "bandwidth_delta_5", "bandwidth_delta_20",
-    "squeeze_score", "boll_expansion_score", "upper_break_strength", "lower_break_strength",
+    "percent_b",
+    "boll_zscore",
+    "bandwidth",
+    "bandwidth_delta_5",
+    "bandwidth_delta_20",
+    "squeeze_score",
+    "boll_expansion_score",
+    "upper_break_strength",
+    "lower_break_strength",
     "bandwidth_percentile",
 ]
 
 WYCKOFF_PRIMITIVE_LABELS = [
-    "trend_direction", "wyckoff_trend_strength", "trading_range_score", "range_position",
-    "support_distance", "resistance_distance", "breakout_strength", "breakdown_strength",
-    "false_breakout_score", "volume_expansion", "volume_contraction", "effort_result_score",
-    "effort_result_divergence", "demand_pressure_proxy", "supply_pressure_proxy",
+    "trend_direction",
+    "wyckoff_trend_strength",
+    "trading_range_score",
+    "range_position",
+    "support_distance",
+    "resistance_distance",
+    "breakout_strength",
+    "breakdown_strength",
+    "false_breakout_score",
+    "volume_expansion",
+    "volume_contraction",
+    "effort_result_score",
+    "effort_result_divergence",
+    "demand_pressure_proxy",
+    "supply_pressure_proxy",
 ]
 
 PHASE_LABELS = ["accumulation_like", "markup", "distribution_like", "markdown", "transition"]
@@ -62,27 +134,60 @@ EVENT_LABELS = ["sc_score", "bc_score", "spring_score", "upthrust_score", "sos_s
 ALL_LABELS = MA_LABELS + BOLL_LABELS + WYCKOFF_PRIMITIVE_LABELS + PHASE_LABELS + EVENT_LABELS
 
 MASK_RECONSTRUCTION_FEATURES = [
-    "ret_1", "intraday_range_prev_close", "intraday_body_prev_close", "range_position",
-    "log1p_volume", "volume_ratio_20", "turnover", "amount_ratio_20", "atr14_close",
+    "ret_1",
+    "intraday_range_prev_close",
+    "intraday_body_prev_close",
+    "range_position",
+    "log1p_volume",
+    "volume_ratio_20",
+    "turnover",
+    "amount_ratio_20",
+    "atr14_close",
     "realized_vol_20",
 ]
 
 FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "PRICE": (
-        "ret_1", "ret_3", "ret_5", "ret_10", "open_prev_close", "high_prev_close",
-        "low_prev_close", "close_prev_close", "intraday_range_prev_close",
-        "intraday_body_prev_close", "body_ratio", "upper_shadow_ratio", "lower_shadow_ratio",
-        "range_position", "gap_ratio",
+        "ret_1",
+        "ret_3",
+        "ret_5",
+        "ret_10",
+        "open_prev_close",
+        "high_prev_close",
+        "low_prev_close",
+        "close_prev_close",
+        "intraday_range_prev_close",
+        "intraday_body_prev_close",
+        "body_ratio",
+        "upper_shadow_ratio",
+        "lower_shadow_ratio",
+        "range_position",
+        "gap_ratio",
     ),
     "VOLUME": (
-        "log1p_volume", "volume_ratio_5", "volume_ratio_10", "volume_ratio_20", "volume_ratio_60",
-        "volume_zscore_20", "volume_zscore_60", "volume_change_1", "volume_change_5",
-        "amount_ratio_5", "amount_ratio_20", "turnover", "turnover_ratio_5",
-        "turnover_ratio_20", "turnover_zscore_20",
+        "log1p_volume",
+        "volume_ratio_5",
+        "volume_ratio_10",
+        "volume_ratio_20",
+        "volume_ratio_60",
+        "volume_zscore_20",
+        "volume_zscore_60",
+        "volume_change_1",
+        "volume_change_5",
+        "amount_ratio_5",
+        "amount_ratio_20",
+        "turnover",
+        "turnover_ratio_5",
+        "turnover_ratio_20",
+        "turnover_zscore_20",
     ),
     "VOLATILITY": (
-        "true_range_close", "atr14_close", "realized_vol_5", "realized_vol_20",
-        "realized_vol_60", "range_atr14",
+        "true_range_close",
+        "atr14_close",
+        "realized_vol_5",
+        "realized_vol_20",
+        "realized_vol_60",
+        "range_atr14",
     ),
 }
 
@@ -103,7 +208,9 @@ def _build_label_specs() -> tuple[LabelSpec, ...]:
     specs.extend(LabelSpec(name, "bollinger", "regression", "CORE_SEQUENCE") for name in BOLL_LABELS)
     auxiliary = {"volume_expansion", "volume_contraction", "demand_pressure_proxy", "supply_pressure_proxy"}
     for name in WYCKOFF_PRIMITIVE_LABELS:
-        specs.append(LabelSpec(name, "wyckoff_primitives", "regression", "AUXILIARY" if name in auxiliary else "CORE_SEQUENCE"))
+        specs.append(
+            LabelSpec(name, "wyckoff_primitives", "regression", "AUXILIARY" if name in auxiliary else "CORE_SEQUENCE")
+        )
     specs.extend(LabelSpec(name, "phase", "soft_distribution", "CORE_SEQUENCE") for name in PHASE_LABELS)
     specs.extend(LabelSpec(name, "events", "binary_event", "CORE_SEQUENCE") for name in EVENT_LABELS)
     return tuple(specs)
@@ -141,9 +248,11 @@ class LabelSchema:
         start = 0
         result: dict[str, slice] = {}
         for name, values in (
-            ("ma", self.ma), ("bollinger", self.bollinger),
+            ("ma", self.ma),
+            ("bollinger", self.bollinger),
             ("wyckoff_primitives", self.wyckoff_primitives),
-            ("phase", self.phase), ("events", self.events),
+            ("phase", self.phase),
+            ("events", self.events),
         ):
             result[name] = slice(start, start + len(values))
             start += len(values)
@@ -153,10 +262,13 @@ class LabelSchema:
         return {
             "schema_version": self.version,
             "groups": {
-                name: list(values) for name, values in (
-                    ("ma", self.ma), ("bollinger", self.bollinger),
+                name: list(values)
+                for name, values in (
+                    ("ma", self.ma),
+                    ("bollinger", self.bollinger),
                     ("wyckoff_primitives", self.wyckoff_primitives),
-                    ("phase", self.phase), ("events", self.events),
+                    ("phase", self.phase),
+                    ("events", self.events),
                 )
             },
             "specs": [

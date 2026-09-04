@@ -80,7 +80,10 @@ def run_purged_walkforward(
             }
         )
     ranks = [float(item["metrics"].get("rank_ic", 0)) for item in windows]
-    excess = [float(item["metrics"].get("research_excess_return_proxy", item["metrics"].get("topk_excess_annual_return", 0))) for item in windows]
+    excess = [
+        float(item["metrics"].get("research_excess_return_proxy", item["metrics"].get("topk_excess_annual_return", 0)))
+        for item in windows
+    ]
     pass_ratio = sum(item["passed"] for item in windows) / len(windows) if windows else 0.0
     positive_ratio = sum(value > 0 for value in ranks) / len(ranks) if ranks else 0.0
     return {

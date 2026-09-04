@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
 
 import torch
 
@@ -20,8 +19,10 @@ class TrainingStage:
     def from_mapping(cls, value: dict, *, default_lr: float = 1e-4) -> "TrainingStage":
         head_lr = float(value.get("head_lr", value.get("lr", default_lr)))
         return cls(
-            name=str(value["name"]), epochs=int(value.get("epochs", 1)),
-            encoder_lr=float(value.get("encoder_lr", head_lr)), head_lr=head_lr,
+            name=str(value["name"]),
+            epochs=int(value.get("epochs", 1)),
+            encoder_lr=float(value.get("encoder_lr", head_lr)),
+            head_lr=head_lr,
             mask_mode=value.get("mask_mode"),
             active_heads=tuple(str(item) for item in value.get("active_heads", ())),
             patience=int(value.get("patience", 3)),

@@ -1,4 +1,5 @@
 """Factor Stability（详细修改方案 §6）。"""
+
 from __future__ import annotations
 
 import numpy as np

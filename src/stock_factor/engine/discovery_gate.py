@@ -4,6 +4,7 @@ Discovery 阶段的准入门：只允许 WalkForward / Statistics / Diagnostics 
 Exposure / Capacity / Recent Alpha 输入 —— 函数签名中不得出现 final_oos，
 从类型层面保证 Final OOS 不参与候选选择（§14-§18）。
 """
+
 from __future__ import annotations
 
 DISCOVERY_GATE_VERSION = "discovery_gate_v1"

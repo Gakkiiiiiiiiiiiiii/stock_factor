@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "content-factor-signal.v5.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "data"],
+  "properties": {
+    "contract_version": {"const": "content-factor-signal.v5.1"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "checksum", "content_snapshot_id", "business_as_of", "knowledge_as_of", "availability_as_of", "pit_mode", "signal_policy_version", "min_support", "producer_commit", "allow_proxy", "manifest_hash", "items"],
+      "properties": {
+        "contract": {"const": "content-factor-signal.v5.1"},
+        "checksum": {"type": "string", "minLength": 1},
+        "content_snapshot_id": {"type": "string", "minLength": 1},
+        "business_as_of": {"type": "string", "format": "date-time"},
+        "knowledge_as_of": {"type": "string", "format": "date-time"},
+        "availability_as_of": {"type": "string", "format": "date-time"},
+        "pit_mode": {"const": "PUBLIC_STRICT"},
+        "signal_policy_version": {"type": "string", "minLength": 1},
+        "min_support": {"type": "integer", "minimum": 1},
+        "producer_commit": {"type": "string", "minLength": 1},
+        "allow_proxy": {"type": "boolean"},
+        "manifest_hash": {"type": "string", "minLength": 1},
+        "items": {"type": "array", "items": {"$ref": "#/$defs/signal"}}
+      }
+    }
+  },
+  "$defs": {
+    "signal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal_id", "symbol", "subject_key", "occurrence_at", "business_as_of", "knowledge_projection_at", "source_available_at", "available_from", "source_availability_quality", "lifecycle_as_of", "sentiment", "knowledge_kind", "truth_status", "source_video_id", "support_count", "producer_commit"],
+      "properties": {
+        "signal_id": {"type": "string", "minLength": 1},
+        "symbol": {"type": "string", "minLength": 1},
+        "subject_key": {"type": "string", "minLength": 1},
+        "occurrence_at": {"type": "string", "format": "date-time"},
+        "business_as_of": {"type": "string", "format": "date-time"},
+        "knowledge_projection_at": {"type": "string", "format": "date-time"},
+        "source_available_at": {"type": "string", "format": "date-time"},
+        "available_from": {"type": "string", "format": "date-time"},
+        "source_availability_quality": {"enum": ["VERIFIED", "PROXY", "UNKNOWN"]},
+        "lifecycle_as_of": {"type": "string", "format": "date-time"},
+        "sentiment": {"type": "string"},
+        "knowledge_kind": {"type": "string"},
+        "truth_status": {"type": "string", "minLength": 1},
+        "source_video_id": {"type": "string"},
+        "support_count": {"type": "integer", "minimum": 0},
+        "producer_commit": {"type": "string", "minLength": 1},
+        "content_attention_score": {"type": ["number", "null"]},
+        "cross_video_consensus": {"type": ["number", "null"]},
+        "cross_video_disagreement": {"type": ["number", "null"]}
+      }
+    }
+  }
+}

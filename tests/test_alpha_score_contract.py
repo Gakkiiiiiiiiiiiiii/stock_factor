@@ -1,4 +1,5 @@
 """On-demand Alpha Score 契约测试（设计文档 §14.2 / §79 / §33）。"""
+
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -60,6 +61,17 @@ def test_mining_job_idempotency_key(tmp_path):
     assert second["job_id"] == first["job_id"]
     third = application.create_mining_job(payload, idempotency_key="mine-2")
     assert third["job_id"] != first["job_id"]
+
+
+def test_distinct_jobs_get_distinct_default_experiment_identity(tmp_path):
+    application, _ = _application(tmp_path)
+    payload = {"symbols": ["600000"], "candidates": [{"name": "x", "rpn": ["ret", "cs_rank"]}]}
+    first = application.create_mining_job(payload)
+    second = application.create_mining_job(payload)
+    assert first["job_id"] != second["job_id"]
+    first_request = application.get_mining_job(first["job_id"])["request"]
+    second_request = application.get_mining_job(second["job_id"])["request"]
+    assert first_request["experiment_id"] != second_request["experiment_id"]
 
 
 def test_health_version_endpoint(tmp_path):

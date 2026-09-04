@@ -3,6 +3,7 @@
 研究敏感性分析（不是 Quant 权威成交回测）：
 turnover proxy + 5/10/20/50bps 成本后的代理收益 + 盈亏平衡成本。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

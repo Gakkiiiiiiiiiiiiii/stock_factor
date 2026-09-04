@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://stock-factor/contracts/factor.v1.json",
+  "title": "stock_factor factor.v1",
+  "type": "object",
+  "required": ["factor_id", "formula", "status", "metrics"],
+  "properties": {
+    "factor_id": {"type": "string"},
+    "formula": {"type": "array", "items": {"type": "string"}},
+    "status": {"type": "string"},
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "gross_metrics": {"type": "object"},
+        "net_metrics": {"type": "object"},
+        "tradability_assessment": {"type": "object"},
+        "tradability_assessment_hash": {"type": "string", "pattern": "^tradability-[0-9a-f]{32}$"},
+        "capacity_artifact_id": {"type": ["string", "null"]},
+        "tradability_policy_version": {"type": ["string", "null"]},
+        "tradability_policy_hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

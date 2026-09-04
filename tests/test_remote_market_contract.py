@@ -1,8 +1,9 @@
 import httpx
 
-from stock_factor.adapters.http.providers import HttpMarketDataProvider
+from stock_factor.adapters.http.providers import ExploratoryMarketDataProvider, HttpMarketDataProvider
 from stock_factor.application.panel import build_feature_panel
 from stock_factor.domain.market import MarketDataSnapshot
+from stock_factor.domain.market_dataset_ref import FormalMarketDatasetRef
 
 
 def test_mining_job_rejected_when_quant_unavailable(tmp_path):
@@ -32,7 +33,7 @@ def test_market_provider_reads_agent_batch_contract(monkeypatch):
         return httpx.Response(
             200,
             json={
-                "contract_version": "market-data.v1",
+                "contract_version": "market-snapshot.v1",
                 "data": {
                     "symbols": ["600000"],
                     "dates": ["2026-08-10"],
@@ -40,13 +41,38 @@ def test_market_provider_reads_agent_batch_contract(monkeypatch):
                     "data_version": "v1",
                     "data_snapshot_id": "s1",
                     "source": "fixture",
+                    "market_snapshot_ref": {
+                        "market_snapshot_id": "s1",
+                        "manifest_hash": "manifest-1",
+                        "calendar_version": "cal-1",
+                        "universe_version": "uni-1",
+                        "corporate_action_version": "ca-1",
+                        "tradability_version": "trad-1",
+                        "quality_seal": "PASS",
+                        "available_from": "2026-08-09T00:00:00+00:00",
+                        "start": "2026-08-10",
+                        "end": "2026-08-10",
+                    },
                 },
             },
             request=httpx.Request("POST", url),
         )
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    snapshot = HttpMarketDataProvider("http://market").get_daily_bars(["600000"], "2026-08-10", "2026-08-10")
+    ref = FormalMarketDatasetRef(
+        market_snapshot_id="s1",
+        manifest_hash="manifest-1",
+        calendar_version="cal-1",
+        universe_version="uni-1",
+        corporate_action_version="ca-1",
+        tradability_version="trad-1",
+        available_from="2026-08-09T00:00:00+00:00",
+        start="2026-08-10",
+        end="2026-08-10",
+    )
+    snapshot = HttpMarketDataProvider("http://market").get_daily_bars(
+        ["600000"], "2026-08-10", "2026-08-10", formal_market_ref=ref
+    )
     assert snapshot.data_snapshot_id == "s1"
     # §12/§76：事实源切换为 quant 后，主路径为 /api/v1/market/bars/batch。
     assert calls[0][0] == "http://market/api/v1/market/bars/batch"
@@ -62,7 +88,7 @@ def test_market_provider_defaults_to_quant(monkeypatch):
     assert provider._url == "http://quant:8011"  # noqa: SLF001
 
 
-def test_market_provider_falls_back_to_legacy_path(monkeypatch):
+def test_exploratory_market_provider_falls_back_to_legacy_path(monkeypatch):
     """迁移期兼容：旧 market-data-service 只提供 /v1/bars/batch（§12）。"""
     calls = []
 
@@ -87,7 +113,9 @@ def test_market_provider_falls_back_to_legacy_path(monkeypatch):
         )
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    snapshot = HttpMarketDataProvider("http://legacy-market").get_daily_bars(["600000"], "2026-08-10", "2026-08-10")
+    snapshot = ExploratoryMarketDataProvider("http://legacy-market").get_daily_bars(
+        ["600000"], "2026-08-10", "2026-08-10"
+    )
     assert snapshot.data_snapshot_id == "s1"
     assert calls == [
         "http://legacy-market/api/v1/market/bars/batch",

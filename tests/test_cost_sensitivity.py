@@ -1,4 +1,5 @@
 """Cost Sensitivity（详细修改方案 §8）。"""
+
 from __future__ import annotations
 
 from stock_factor.engine.cost_sensitivity import cost_sensitivity_report
@@ -10,7 +11,12 @@ def test_cost_report_fields_and_monotonic_drag():
     report = cost_sensitivity_report(selections, returns, horizon=5)
     payload = report.to_dict()
     assert payload["metric_scope"] == "RESEARCH_PROXY"
-    assert payload["return_after_5bps"] > payload["return_after_10bps"] > payload["return_after_20bps"] > payload["return_after_50bps"]
+    assert (
+        payload["return_after_5bps"]
+        > payload["return_after_10bps"]
+        > payload["return_after_20bps"]
+        > payload["return_after_50bps"]
+    )
     assert payload["turnover_proxy"] > 0
 
 

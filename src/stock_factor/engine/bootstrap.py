@@ -3,6 +3,7 @@
 金融时序不是 IID：IC / Return Proxy 的置信区间必须用分块自助法。
 提供 Moving Block Bootstrap 与 Stationary Bootstrap（ Politis & Romano）。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -20,7 +21,12 @@ def moving_block_bootstrap(
     values = values[~np.isnan(values)]
     count = values.size
     if count < max(4, block_length) or block_length < 1:
-        return {"point_estimate": float(statistic(values)) if count else float("nan"), "ci_lower": None, "ci_upper": None, "iterations": 0}
+        return {
+            "point_estimate": float(statistic(values)) if count else float("nan"),
+            "ci_lower": None,
+            "ci_upper": None,
+            "iterations": 0,
+        }
     rng = np.random.default_rng(seed)
     starts_max = count - block_length + 1
     estimates = np.empty(iterations)
@@ -55,7 +61,12 @@ def stationary_bootstrap(
     values = values[~np.isnan(values)]
     count = values.size
     if count < 4 or expected_block_length < 1.0:
-        return {"point_estimate": float(statistic(values)) if count else float("nan"), "ci_lower": None, "ci_upper": None, "iterations": 0}
+        return {
+            "point_estimate": float(statistic(values)) if count else float("nan"),
+            "ci_lower": None,
+            "ci_upper": None,
+            "iterations": 0,
+        }
     rng = np.random.default_rng(seed)
     switch_probability = 1.0 / expected_block_length
     estimates = np.empty(iterations)

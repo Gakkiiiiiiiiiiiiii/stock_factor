@@ -1,4 +1,5 @@
 """Block Bootstrap（详细修改方案 P1-4）。"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -29,7 +30,9 @@ def test_stationary_bootstrap_covers_mean():
 def test_block_bootstrap_wider_ci_than_iid_for_autocorrelated_series():
     rng = np.random.default_rng(2)
     base = rng.normal(0.0, 1.0, size=400)
-    autocorr = np.array([base[0]] + [0.9 * autocorr_value + 0.1 * base_value for autocorr_value, base_value in zip(base[:-1], base[1:])])
+    autocorr = np.array(
+        [base[0]] + [0.9 * autocorr_value + 0.1 * base_value for autocorr_value, base_value in zip(base[:-1], base[1:])]
+    )
     block = moving_block_bootstrap(autocorr, np.mean, block_length=20, iterations=300, seed=0)
     assert block["ci_upper"] - block["ci_lower"] > 0
 

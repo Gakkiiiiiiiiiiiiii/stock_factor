@@ -38,7 +38,10 @@ class FixtureContent:
         ]
 
 
-def test_job_worker_persists_factor_and_real_apis(tmp_path):
+def test_job_worker_persists_factor_and_real_apis(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTOR_RUNTIME_PROFILE", "test")
+    monkeypatch.setenv("FACTOR_PAPER_AUTHORITY", "quant")
+    monkeypatch.delenv("QUANT_SERVICE_URL", raising=False)
     url = f"sqlite:///{tmp_path / 'factor.db'}"
     application = build_application(url, FixtureMarket(), FixtureContent())
     job = application.create_mining_job(
@@ -54,11 +57,9 @@ def test_job_worker_persists_factor_and_real_apis(tmp_path):
         None, ["ret", "ts_mean_5", "neg", "cs_rank"], [f"6000{index:02d}" for index in range(20)], None, None, 5
     )
     assert evaluation["data_snapshot_id"] == "snapshot-1"
-    frozen = application.generate_paper_orders(
-        [{"symbol": "600000", "score": 0.9, "next_trading_day": "2026-08-13"}], "2026-08-12", "snapshot-1", 10
-    )
-    assert frozen["orders"][0]["status"] == "FROZEN"
-    assert application.paper_state()["data_snapshot_id"] == "snapshot-1"
+    from stock_factor.adapters.http.quant_paper_client import QuantPaperClient
+
+    assert isinstance(application._paper, QuantPaperClient)  # noqa: SLF001
 
 
 def test_job_survives_application_restart(tmp_path):

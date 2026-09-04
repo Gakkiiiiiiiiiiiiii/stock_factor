@@ -4,6 +4,7 @@
 截面回归剔除暴露后重新计算 IC，避免把风格暴露误判为 Alpha。
 每个评估必须同时记录 raw_ic 与 neutralized_ic。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -69,7 +70,9 @@ def neutralized_ic_report(
         raw = _spearman(factor[:, day], returns[:, day])
         if raw is None:
             continue
-        neutralized_factor = neutralize_cross_section(factor[:, day], exposures[:, day] if exposures.ndim == 3 else exposures)
+        neutralized_factor = neutralize_cross_section(
+            factor[:, day], exposures[:, day] if exposures.ndim == 3 else exposures
+        )
         neutralized = _spearman(neutralized_factor, returns[:, day])
         if neutralized is None:
             continue

@@ -1,0 +1,15 @@
+{
+  "producer": "quant",
+  "consumer": "stock_factor",
+  "request": {"contract_version": "paper-account.v1", "account_id": "paper-fixture"},
+  "response": {
+    "contract_version": "paper-account.v1",
+    "account_id": "paper-fixture",
+    "authority": "quant",
+    "account_type": "PAPER",
+    "as_of": "2026-08-10T00:00:00Z",
+    "equity": 100000.0,
+    "positions": [],
+    "orders": []
+  }
+}

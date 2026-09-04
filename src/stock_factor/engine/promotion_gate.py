@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from stock_factor.domain.tradability_artifact import TradabilityAssessmentArtifact
+
 
 @dataclass(frozen=True)
 class PromotionGateResult:
@@ -30,6 +32,9 @@ def evaluate_promotion_gate(
     exposure: dict | None = None,
     capacity: dict | None = None,
     recent_alpha: dict | None = None,
+    tradability_assessment: dict | None = None,
+    tradability: dict | None = None,
+    formal_research: bool = False,
     min_window_pass_ratio: float = 0.60,
     min_capacity_proxy: float = 1.0,
     max_abs_liquidity_exposure: float = 0.80,
@@ -46,6 +51,7 @@ def evaluate_promotion_gate(
         capacity or {},
         recent_alpha or {},
     )
+    tradability_assessment = tradability_assessment or tradability or {}
     reasons: list[str] = []
     if not walkforward.get("passed"):
         reasons.append("WALKFORWARD_FAILED")
@@ -78,6 +84,15 @@ def evaluate_promotion_gate(
         reasons.append("CAPACITY_FAILED")
     if not recent_alpha or not recent_alpha.get("passed"):
         reasons.append("RECENT_ALPHA_FAILED")
+    if formal_research:
+        if not tradability_assessment:
+            reasons.append("TRADABILITY_ASSESSMENT_MISSING")
+        elif not tradability_assessment.get("formal_eligible") or not (
+            tradability_assessment.get("gate_result") or {}
+        ).get("passed"):
+            reasons.append("TRADABILITY_CAPACITY_FAILED")
+        elif not TradabilityAssessmentArtifact.verify_payload(tradability_assessment):
+            reasons.append("TRADABILITY_ARTIFACT_INTEGRITY_FAILED")
     return PromotionGateResult(
         passed=not reasons,
         metrics={
@@ -89,6 +104,8 @@ def evaluate_promotion_gate(
             "exposure": exposure,
             "capacity": capacity,
             "recent_alpha": recent_alpha,
+            "tradability_assessment": tradability_assessment,
+            "formal_research": formal_research,
             "promotion_gate_version": gate_version,
             "statistical_validation_version": statistical_validation_version,
             "data_snapshot_id": data_snapshot_id,
@@ -124,6 +141,9 @@ def evaluate_promotion_gate_v2(
     exposure: dict | None = None,
     neutralization: dict | None = None,
     governance: dict | None = None,
+    tradability_assessment: dict | None = None,
+    tradability: dict | None = None,
+    formal_research: bool = False,
     min_window_pass_ratio: float = 0.60,
     min_sign_consistency: float = 0.55,
     min_break_even_cost_bps: float = 5.0,
@@ -141,6 +161,7 @@ def evaluate_promotion_gate_v2(
     exposure = exposure or {}
     neutralization = neutralization or {}
     governance = governance or {}
+    tradability_assessment = tradability_assessment or tradability or {}
 
     failed_gates: list[dict[str, str]] = []
 
@@ -205,6 +226,16 @@ def evaluate_promotion_gate_v2(
         for required in ("experiment_id", "candidate_freeze"):
             if not governance.get(required):
                 _fail("RESEARCH_GOVERNANCE", f"{required} missing")
+
+    # Gate 9 - Economic implementation.  Existing exploratory callers may
+    # omit this evidence; formal callers must provide a sealed assessment.
+    if formal_research or tradability_assessment:
+        if not tradability_assessment:
+            _fail("TRADABILITY_CAPACITY", "tradability assessment artifact missing")
+        elif not tradability_assessment.get("formal_eligible") or not (
+            tradability_assessment.get("gate_result") or {}
+        ).get("passed"):
+            _fail("TRADABILITY_CAPACITY", "tradability/capacity gate failed")
 
     return {
         "passed": not failed_gates,

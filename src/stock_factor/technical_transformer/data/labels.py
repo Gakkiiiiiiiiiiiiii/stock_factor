@@ -69,7 +69,9 @@ def build_labels(frame: pd.DataFrame) -> TechnicalLabels:
     turnover_observed = data["turnover_observed"].astype(bool) if "turnover_observed" in data else turnover.notna()
     turnover_for_label = turnover.where(turnover_observed, np.nan)
     returns = close.pct_change(fill_method=None).fillna(0.0)
-    tr = pd.concat([(high - low).abs(), (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
+    tr = pd.concat([(high - low).abs(), (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(
+        axis=1
+    )
     atr14 = tr.rolling(14, min_periods=1).mean().replace(0, np.nan)
     ma = {window: close.rolling(window, min_periods=window).mean() for window in (5, 10, 20, 30, 60, 120)}
     result = pd.DataFrame(index=data.index)
@@ -77,13 +79,20 @@ def build_labels(frame: pd.DataFrame) -> TechnicalLabels:
         result[f"ma{window}_slope"] = ma[window].pct_change(5, fill_method=None)
     for window in (5, 20, 60, 120):
         result[f"close_ma{window}_distance"] = close / (ma[window] + EPS) - 1
-    result["bull_alignment_score"] = ((ma[5] > ma[10]).astype(float) + (ma[10] > ma[20]).astype(float) + (ma[20] > ma[60]).astype(float)) / 3.0
-    result["bear_alignment_score"] = ((ma[5] < ma[10]).astype(float) + (ma[10] < ma[20]).astype(float) + (ma[20] < ma[60]).astype(float)) / 3.0
-    result["ma_trend_strength"] = _clip01(close.pct_change(20).abs() / (returns.rolling(20, min_periods=1).std(ddof=0) * np.sqrt(20) + EPS))
+    result["bull_alignment_score"] = (
+        (ma[5] > ma[10]).astype(float) + (ma[10] > ma[20]).astype(float) + (ma[20] > ma[60]).astype(float)
+    ) / 3.0
+    result["bear_alignment_score"] = (
+        (ma[5] < ma[10]).astype(float) + (ma[10] < ma[20]).astype(float) + (ma[20] < ma[60]).astype(float)
+    ) / 3.0
+    result["ma_trend_strength"] = _clip01(
+        close.pct_change(20).abs() / (returns.rolling(20, min_periods=1).std(ddof=0) * np.sqrt(20) + EPS)
+    )
     normalized = pd.concat([ma[5] / close, ma[10] / close, ma[20] / close, ma[60] / close], axis=1)
     compression = normalized.std(axis=1, ddof=0)
     result["compression_score"] = _clip01(1.0 - compression / 0.08)
     result["ma_expansion_score"] = _clip01(compression / 0.08)
+
     def signed_cross(short: int, long: int) -> tuple[pd.Series, pd.Series]:
         previous = ma[short].shift(1) - ma[long].shift(1)
         current = ma[short] - ma[long]
@@ -125,14 +134,19 @@ def build_labels(frame: pd.DataFrame) -> TechnicalLabels:
     trend20 = close.pct_change(20)
     path = returns.abs().rolling(20, min_periods=5).sum()
     result["trend_direction"] = np.tanh(trend20 * 8)
-    result["wyckoff_trend_strength"] = _clip01(trend20.abs() / (returns.rolling(20, min_periods=5).std(ddof=0) * np.sqrt(20) + EPS))
+    result["wyckoff_trend_strength"] = _clip01(
+        trend20.abs() / (returns.rolling(20, min_periods=5).std(ddof=0) * np.sqrt(20) + EPS)
+    )
     result["trading_range_score"] = _clip01(1.0 - trend20.abs() / (path + EPS))
     result["range_position"] = _clip01(range_position)
     result["support_distance"] = _clip01((close - rolling_low) / (atr14 + EPS) / 5.0)
     result["resistance_distance"] = _clip01((rolling_high - close) / (atr14 + EPS) / 5.0)
     result["breakout_strength"] = _clip01((close - rolling_high) / (atr14 + EPS))
     result["breakdown_strength"] = _clip01((rolling_low - close) / (atr14 + EPS))
-    result["false_breakout_score"] = _clip01(((high > rolling_high) & (close < rolling_high)).astype(float) + ((low < rolling_low) & (close > rolling_low)).astype(float))
+    result["false_breakout_score"] = _clip01(
+        ((high > rolling_high) & (close < rolling_high)).astype(float)
+        + ((low < rolling_low) & (close > rolling_low)).astype(float)
+    )
     v20 = volume / (volume.rolling(20, min_periods=5).mean() + EPS)
     result["volume_expansion"] = _clip01((v20 - 1.0) / 2.0)
     result["volume_contraction"] = _clip01((1.0 - v20) / 0.8)
@@ -140,16 +154,31 @@ def build_labels(frame: pd.DataFrame) -> TechnicalLabels:
     result["effort_result_score"] = _clip01(effort / (returns.abs() + tr / (close + EPS) + 0.02))
     result["effort_result_divergence"] = np.tanh((effort - 1.0) - (returns.abs() + tr / (close + EPS)) * 10)
     position = (close - low) / (high - low + EPS)
-    result["demand_pressure_proxy"] = _clip01(0.5 + 0.25 * np.tanh(returns * 10) + 0.2 * (position - 0.5) + 0.1 * _clip01((v20 - 1) / 2))
-    result["supply_pressure_proxy"] = _clip01(0.5 - 0.25 * np.tanh(returns * 10) + 0.2 * (0.5 - position) + 0.1 * _clip01((v20 - 1) / 2))
+    result["demand_pressure_proxy"] = _clip01(
+        0.5 + 0.25 * np.tanh(returns * 10) + 0.2 * (position - 0.5) + 0.1 * _clip01((v20 - 1) / 2)
+    )
+    result["supply_pressure_proxy"] = _clip01(
+        0.5 - 0.25 * np.tanh(returns * 10) + 0.2 * (0.5 - position) + 0.1 * _clip01((v20 - 1) / 2)
+    )
 
-    phase_scores = pd.DataFrame({
-        "accumulation_like": 1.2 * result["trading_range_score"] + 0.8 * result["demand_pressure_proxy"] + 0.3 * (1 - result["wyckoff_trend_strength"]),
-        "markup": 1.2 * _clip01(result["trend_direction"]) + 0.8 * result["bull_alignment_score"] + 0.3 * result["demand_pressure_proxy"],
-        "distribution_like": 1.2 * result["trading_range_score"] + 0.8 * result["supply_pressure_proxy"] + 0.3 * (1 - result["wyckoff_trend_strength"]),
-        "markdown": 1.2 * _clip01(-result["trend_direction"]) + 0.8 * result["bear_alignment_score"] + 0.3 * result["supply_pressure_proxy"],
-        "transition": 1.0 - result["trading_range_score"] * 0.5 - result["wyckoff_trend_strength"] * 0.5,
-    }, index=data.index)
+    phase_scores = pd.DataFrame(
+        {
+            "accumulation_like": 1.2 * result["trading_range_score"]
+            + 0.8 * result["demand_pressure_proxy"]
+            + 0.3 * (1 - result["wyckoff_trend_strength"]),
+            "markup": 1.2 * _clip01(result["trend_direction"])
+            + 0.8 * result["bull_alignment_score"]
+            + 0.3 * result["demand_pressure_proxy"],
+            "distribution_like": 1.2 * result["trading_range_score"]
+            + 0.8 * result["supply_pressure_proxy"]
+            + 0.3 * (1 - result["wyckoff_trend_strength"]),
+            "markdown": 1.2 * _clip01(-result["trend_direction"])
+            + 0.8 * result["bear_alignment_score"]
+            + 0.3 * result["supply_pressure_proxy"],
+            "transition": 1.0 - result["trading_range_score"] * 0.5 - result["wyckoff_trend_strength"] * 0.5,
+        },
+        index=data.index,
+    )
     phase = _softmax(phase_scores)
     result[PHASE_LABELS] = phase
 
@@ -157,10 +186,20 @@ def build_labels(frame: pd.DataFrame) -> TechnicalLabels:
     upthrust = ((high > rolling_high) & (close < rolling_high) & (result["trading_range_score"] > 0.25)).astype(float)
     result["spring_score"] = _clip01(spring * (0.5 + 0.5 * result["demand_pressure_proxy"]))
     result["upthrust_score"] = _clip01(upthrust * (0.5 + 0.5 * result["supply_pressure_proxy"]))
-    result["sc_score"] = _clip01((result["breakdown_strength"] * 0.4 + result["volume_expansion"] * 0.3 + result["supply_pressure_proxy"] * 0.3) * (1 - result["wyckoff_trend_strength"] * 0.25))
-    result["bc_score"] = _clip01((result["breakout_strength"] * 0.4 + result["volume_expansion"] * 0.3 + result["demand_pressure_proxy"] * 0.3) * (1 - result["wyckoff_trend_strength"] * 0.25))
-    result["sos_score"] = _clip01(result["breakout_strength"] * 0.45 + result["demand_pressure_proxy"] * 0.35 + result["volume_expansion"] * 0.2)
-    result["sow_score"] = _clip01(result["breakdown_strength"] * 0.45 + result["supply_pressure_proxy"] * 0.35 + result["volume_expansion"] * 0.2)
+    result["sc_score"] = _clip01(
+        (result["breakdown_strength"] * 0.4 + result["volume_expansion"] * 0.3 + result["supply_pressure_proxy"] * 0.3)
+        * (1 - result["wyckoff_trend_strength"] * 0.25)
+    )
+    result["bc_score"] = _clip01(
+        (result["breakout_strength"] * 0.4 + result["volume_expansion"] * 0.3 + result["demand_pressure_proxy"] * 0.3)
+        * (1 - result["wyckoff_trend_strength"] * 0.25)
+    )
+    result["sos_score"] = _clip01(
+        result["breakout_strength"] * 0.45 + result["demand_pressure_proxy"] * 0.35 + result["volume_expansion"] * 0.2
+    )
+    result["sow_score"] = _clip01(
+        result["breakdown_strength"] * 0.45 + result["supply_pressure_proxy"] * 0.35 + result["volume_expansion"] * 0.2
+    )
     result = result[ALL_LABELS].replace([np.inf, -np.inf], np.nan)
     valid = result.notna()
     # A placeholder turnover must not become a synthetic negative/positive
@@ -177,7 +216,9 @@ def assert_label_causality(frame: pd.DataFrame, cutoff: int) -> None:
 
     baseline = build_labels(frame).values.iloc[:cutoff].reset_index(drop=True)
     changed = frame.copy()
-    future_columns = [column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed]
+    future_columns = [
+        column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed
+    ]
     changed.loc[cutoff:, future_columns] = changed.loc[cutoff:, future_columns].astype(float) * 1000.0
     altered = build_labels(changed).values.iloc[:cutoff].reset_index(drop=True)
     assert_frame_equal(baseline, altered, check_exact=False, rtol=1e-6, atol=1e-6)

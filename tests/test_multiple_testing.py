@@ -1,4 +1,5 @@
 """Multiple Testing（详细修改方案 P1-1）。"""
+
 from __future__ import annotations
 
 import pytest
@@ -64,7 +65,9 @@ def test_corrected_results_are_stable_and_deterministic():
 
 
 def test_correct_multiple_testing_records_trial_counts():
-    registry = TrialRegistry(hypothesis_count=50, candidate_count=30, tested_factor_count=30, p_values=[0.001, 0.4, 0.8])
+    registry = TrialRegistry(
+        hypothesis_count=50, candidate_count=30, tested_factor_count=30, p_values=[0.001, 0.4, 0.8]
+    )
     result = correct_multiple_testing(registry)
     assert result["trials"]["hypothesis_count"] == 50
     assert result["trials"]["effective_trials"] == 50

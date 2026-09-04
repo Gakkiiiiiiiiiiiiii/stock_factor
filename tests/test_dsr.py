@@ -1,4 +1,5 @@
 """DSR / PSR（详细修改方案 P1-2）。"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -11,8 +12,13 @@ def test_sharpe_validation_output_contract():
     returns = rng.normal(0.001, 0.02, size=500)
     report = sharpe_validation(returns, number_of_trials=20)
     for field in (
-        "observed_sharpe", "probabilistic_sharpe_ratio", "deflated_sharpe_ratio",
-        "number_of_trials", "skewness", "kurtosis", "sample_length",
+        "observed_sharpe",
+        "probabilistic_sharpe_ratio",
+        "deflated_sharpe_ratio",
+        "number_of_trials",
+        "skewness",
+        "kurtosis",
+        "sample_length",
     ):
         assert field in report
     assert report["sample_length"] == 500

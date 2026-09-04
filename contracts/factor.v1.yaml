@@ -9,7 +9,8 @@ endpoints:
   - name: get_factor
     method: GET
     path: /api/v1/factors/{factor_id}
-    returns: [formula, status, RankIC, ICIR, OOS, lifecycle, capacity, exposure]
+    returns: [formula, status, RankIC, ICIR, OOS, lifecycle, capacity, exposure,
+              tradability_assessment, tradability_assessment_hash, gross_metrics, net_metrics]
   - name: alpha_score
     method: POST
     path: /api/v1/alpha/score
@@ -95,6 +96,15 @@ promotion_gate_v2:
   gates: [DATA_QUALITY, DISCOVERY_IC, STABILITY, MULTIPLE_TESTING, FINAL_OOS,
           COST_SENSITIVITY, EXPOSURE_NEUTRALIZATION, RESEARCH_GOVERNANCE]
   response: { passed: boolean, failed_gates: [{ gate: string, reason: string }] }
+tradability_assessment:
+  artifact_type: TradabilityAssessmentArtifact
+  required_for_formal_promotion: true
+  identity: [artifact_id, factor_artifact_id, market_snapshot_id, execution_model_version,
+             execution_calibration_checksum]
+  metrics: [gross_metrics, net_metrics, turnover, ic_decay, holding_period_sensitivity,
+            limit_hit_rate, halt_exposure, participation_rate, capacity_curve,
+            neutralized_contribution]
+  assumptions: [annualization_days, rebalance, horizon_days, rounding, cash_assumption, fillability]
 factor_set:
   # 详细修改方案 §11：Agent 使用 factor_set_id 而非临时查询 active factors
   identity: [factor_set_id, factor_set_version, factor_ids, factor_versions, weights,

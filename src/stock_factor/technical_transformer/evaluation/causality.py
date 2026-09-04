@@ -61,7 +61,11 @@ def _compare_labels(first: Any, second: Any) -> tuple[bool, bool]:
     first_valid = getattr(first, "valid", None)
     second_valid = getattr(second, "valid", None)
     values_same = _compare_arrays(first, second)
-    validity_same = True if first_valid is None or second_valid is None else bool(np.array_equal(_array(first_valid), _array(second_valid)))
+    validity_same = (
+        True
+        if first_valid is None or second_valid is None
+        else bool(np.array_equal(_array(first_valid), _array(second_valid)))
+    )
     return values_same, validity_same
 
 
@@ -79,10 +83,17 @@ def _call_window_builder(builder: Callable[..., Any], frame: pd.DataFrame, cutof
 def _changed_future(frame: pd.DataFrame, cutoff: int, *, rng: np.random.Generator | None = None) -> pd.DataFrame:
     changed = frame.copy()
     rng = rng or np.random.default_rng(0)
-    columns = [column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed]
+    columns = [
+        column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed
+    ]
     if cutoff + 1 < len(changed) and columns:
-        future_index = changed.index[cutoff + 1:]
+        future_index = changed.index[cutoff + 1 :]
         mode = int(rng.integers(0, 5))
+        # Future perturbations are floating-point transforms.  Cast the
+        # copied raw-bar columns before assignment so pandas does not emit a
+        # warning (or change behavior in a future pandas release) for writing
+        # float values back into integer columns.
+        changed[columns] = changed[columns].astype(float)
         values = changed.loc[future_index, columns].astype(float).to_numpy()
         if mode == 0:
             values *= 1000.0
@@ -121,10 +132,17 @@ def run_causality_suite(
     """
     if frames is None:
         return {
-            "status": "NOT_EVALUATED", "cases": 0, "feature_violations": 0, "label_violations": 0,
-            "label_value_violations": 0, "label_validity_violations": 0,
-            "window_violations": 0, "model_output_violations": 0,
-            "total_violations": 1, "passed": False, "reason": "NO_REAL_INPUT",
+            "status": "NOT_EVALUATED",
+            "cases": 0,
+            "feature_violations": 0,
+            "label_violations": 0,
+            "label_value_violations": 0,
+            "label_validity_violations": 0,
+            "window_violations": 0,
+            "model_output_violations": 0,
+            "total_violations": 1,
+            "passed": False,
+            "reason": "NO_REAL_INPUT",
         }
     candidates: list[tuple[pd.DataFrame, int]] = []
     rng = np.random.default_rng(seed)
@@ -146,9 +164,12 @@ def run_causality_suite(
         changed_features = feature_builder(changed)
         original_labels = label_builder(frame)
         changed_labels = label_builder(changed)
-        feature_same = _compare_arrays(_historical(original_features, cutoff + 1), _historical(changed_features, cutoff + 1))
+        feature_same = _compare_arrays(
+            _historical(original_features, cutoff + 1), _historical(changed_features, cutoff + 1)
+        )
         label_values_same, label_validity_same = _compare_labels(
-            _historical(original_labels, cutoff + 1), _historical(changed_labels, cutoff + 1),
+            _historical(original_labels, cutoff + 1),
+            _historical(changed_labels, cutoff + 1),
         )
         counts["feature_violations"] += int(not feature_same)
         counts["label_value_violations"] += int(not label_values_same)
@@ -163,8 +184,12 @@ def run_causality_suite(
                 model.eval()
                 model_device = next(model.parameters()).device
                 with torch.no_grad():
-                    first_tensor = first_window if isinstance(first_window, torch.Tensor) else torch.as_tensor(first_window)
-                    second_tensor = second_window if isinstance(second_window, torch.Tensor) else torch.as_tensor(second_window)
+                    first_tensor = (
+                        first_window if isinstance(first_window, torch.Tensor) else torch.as_tensor(first_window)
+                    )
+                    second_tensor = (
+                        second_window if isinstance(second_window, torch.Tensor) else torch.as_tensor(second_window)
+                    )
                     if first_tensor.ndim == 2:
                         first_tensor = first_tensor.unsqueeze(0)
                     if second_tensor.ndim == 2:
@@ -182,7 +207,13 @@ def run_causality_suite(
         + counts["window_violations"]
         + counts["model_output_violations"]
     )
-    return {"status": "EVALUATED", "cases": len(candidates), **counts, "total_violations": total, "passed": bool(candidates) and total == 0}
+    return {
+        "status": "EVALUATED",
+        "cases": len(candidates),
+        **counts,
+        "total_violations": total,
+        "passed": bool(candidates) and total == 0,
+    }
 
 
 def _outputs_equal(first: Any, second: Any) -> bool:

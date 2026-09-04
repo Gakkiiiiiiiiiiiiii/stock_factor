@@ -40,10 +40,19 @@ def evaluate_prediction_arrays(
         names = getattr(LABEL_SCHEMA, group)
         if group == "phase":
             rows = valid.all(axis=1)
-            metrics[group] = {"aggregate": soft_phase_metrics(target[rows], prediction[rows]) if rows.any() else {
-                "soft_ce": 0.0, "kl_divergence": 0.0, "js_divergence": 0.0, "brier_score": 0.0,
-                "ece": 0.0, "macro_f1": 0.0, "confusion_matrix": [],
-            }}
+            metrics[group] = {
+                "aggregate": soft_phase_metrics(target[rows], prediction[rows])
+                if rows.any()
+                else {
+                    "soft_ce": 0.0,
+                    "kl_divergence": 0.0,
+                    "js_divergence": 0.0,
+                    "brier_score": 0.0,
+                    "ece": 0.0,
+                    "macro_f1": 0.0,
+                    "confusion_matrix": [],
+                }
+            }
             continue
         per_target: dict[str, Any] = {}
         for index, name in enumerate(names):
@@ -58,7 +67,17 @@ def evaluate_prediction_arrays(
                 per_target[name] = regression_metrics(prediction[mask, index], target[mask, index])
             per_target[name]["valid_count"] = int(mask.sum())
         if group == "events":
-            aggregate_keys = ("pr_auc", "relative_pr", "pr_auc_multiple_of_prevalence", "f1", "precision", "recall", "ece", "precision_at_top1pct", "precision_at_top5pct")
+            aggregate_keys = (
+                "pr_auc",
+                "relative_pr",
+                "pr_auc_multiple_of_prevalence",
+                "f1",
+                "precision",
+                "recall",
+                "ece",
+                "precision_at_top1pct",
+                "precision_at_top5pct",
+            )
         else:
             aggregate_keys = ("mae", "rmse", "pearson", "spearman", "sign_accuracy")
         valid_items = [value for value in per_target.values() if value.get("valid_count", 0) > 0]
@@ -76,15 +95,23 @@ def summarize_metrics(metrics: dict[str, Any]) -> dict[str, float]:
     events = metrics.get("events", {})
     slope_names = LABEL_SCHEMA.ma[:6]
     primitive_names = (
-        "trend_direction", "wyckoff_trend_strength", "trading_range_score", "support_distance",
-        "resistance_distance", "breakout_strength", "breakdown_strength", "false_breakout_score",
+        "trend_direction",
+        "wyckoff_trend_strength",
+        "trading_range_score",
+        "support_distance",
+        "resistance_distance",
+        "breakout_strength",
+        "breakdown_strength",
+        "false_breakout_score",
         "effort_result_divergence",
     )
     event_names = LABEL_SCHEMA.events
     return {
         "ma_slope_mean_pearson": _mean([ma.get(name, {}) for name in slope_names], "pearson"),
         "ma_slope_mean_sign_accuracy": _mean([ma.get(name, {}) for name in slope_names], "sign_accuracy"),
-        "ma_alignment_spearman": _mean([ma.get(name, {}) for name in ("bull_alignment_score", "bear_alignment_score")], "spearman"),
+        "ma_alignment_spearman": _mean(
+            [ma.get(name, {}) for name in ("bull_alignment_score", "bear_alignment_score")], "spearman"
+        ),
         "ma_compression_pearson": _metric(ma, "compression_score", "pearson"),
         "bollinger_percent_b_pearson": _metric(boll, "percent_b", "pearson"),
         "bollinger_boll_zscore_pearson": _metric(boll, "boll_zscore", "pearson"),
@@ -129,12 +156,21 @@ def technical_components(metrics: dict[str, Any]) -> dict[str, float]:
         + 0.10 * summary.get("event_precision_at_top1pct", 0.0)
         + 0.10 * summary.get("event_precision_at_top5pct", 0.0)
     )
-    return {"ma": float(ma), "boll": float(boll), "primitive": float(primitive), "phase": float(phase), "event": float(event)}
+    return {
+        "ma": float(ma),
+        "boll": float(boll),
+        "primitive": float(primitive),
+        "phase": float(phase),
+        "event": float(event),
+    }
 
 
 def technical_composite(metrics: dict[str, Any]) -> float:
     components = technical_components(metrics)
     return float(
-        0.20 * components["ma"] + 0.20 * components["boll"] + 0.25 * components["primitive"]
-        + 0.15 * components["phase"] + 0.20 * components["event"]
+        0.20 * components["ma"]
+        + 0.20 * components["boll"]
+        + 0.25 * components["primitive"]
+        + 0.15 * components["phase"]
+        + 0.20 * components["event"]
     )

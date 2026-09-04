@@ -2,17 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
+from stock_factor.config.schema import CONFIG_ROOT, load_config
 from stock_factor.engine.vocab import is_valid_token
 
 
 class Alpha191SeedLibrary:
     def __init__(self, path: Path | None = None) -> None:
-        self._path = path or Path(__file__).resolve().parents[3] / "config" / "factor_seed_alpha191.yaml"
+        self._path = path or CONFIG_ROOT / "factor_seed_alpha191.yaml"
 
     def load(self) -> list[dict]:
-        payload = yaml.safe_load(self._path.read_text(encoding="utf-8")) or {}
+        payload = load_config(self._path).payload
         seeds = payload.get("seeds") if isinstance(payload, dict) else []
         return [
             {

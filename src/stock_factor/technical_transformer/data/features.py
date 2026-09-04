@@ -3,8 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .schemas import CONTINUOUS_FEATURES, FEATURE_NAMES, STATE_FEATURES
-
+from .schemas import FEATURE_NAMES, STATE_FEATURES
 
 EPS = 1e-8
 
@@ -41,7 +40,9 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     data = frame.sort_values("trading_date").copy()
     close = data["close"].astype(float)
     prev_close = close.shift(1)
-    high, low, open_, volume, amount = [data[name].astype(float) for name in ("high", "low", "open", "volume", "amount")]
+    high, low, open_, volume, amount = [
+        data[name].astype(float) for name in ("high", "low", "open", "volume", "amount")
+    ]
     turnover = data["turnover"].astype(float) if "turnover" in data else pd.Series(np.nan, index=data.index)
     turnover_value = turnover.fillna(0.0)
     day_range = (high - low).clip(lower=0)
@@ -92,7 +93,11 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     price_observed = data[["open", "high", "low", "close"]].notna().all(axis=1).astype(float)
     volume_observed = _observed(data, "volume")
     turnover_observed = _observed_flag(data, "turnover", "turnover_observed")
-    result["is_suspended"] = data["is_suspended"].astype(float) if "is_suspended" in data else ((volume <= 0) | (price_observed == 0)).astype(float)
+    result["is_suspended"] = (
+        data["is_suspended"].astype(float)
+        if "is_suspended" in data
+        else ((volume <= 0) | (price_observed == 0)).astype(float)
+    )
     result["is_st"] = data["is_st"].astype(float) if "is_st" in data else 0.0
     result["is_star_st"] = data["is_star_st"].astype(float) if "is_star_st" in data else 0.0
     result["is_delisting"] = data["is_delisting"].astype(float) if "is_delisting" in data else 0.0
@@ -113,9 +118,9 @@ def build_features(frame: pd.DataFrame) -> pd.DataFrame:
     # Quality covers the price/volume calendar row.  Turnover is a separate
     # group mask so missing PIT capital does not delete an otherwise valid day.
     valid = price_observed.astype(bool) & volume_observed.astype(bool)
-    valid &= ((high >= pd.concat([open_, close], axis=1).max(axis=1)) | ~price_observed.astype(bool))
-    valid &= ((low <= pd.concat([open_, close], axis=1).min(axis=1)) | ~price_observed.astype(bool))
-    valid &= ((high >= low) | ~price_observed.astype(bool))
+    valid &= (high >= pd.concat([open_, close], axis=1).max(axis=1)) | ~price_observed.astype(bool)
+    valid &= (low <= pd.concat([open_, close], axis=1).min(axis=1)) | ~price_observed.astype(bool)
+    valid &= (high >= low) | ~price_observed.astype(bool)
     result["quality_mask"] = valid.astype(float)
     if "quality_mask" in data:
         result["quality_mask"] = data["quality_mask"].astype(float).fillna(result["quality_mask"])
@@ -133,7 +138,9 @@ def assert_feature_causality(frame: pd.DataFrame, cutoff: int) -> None:
 
     baseline = build_features(frame).iloc[:cutoff].reset_index(drop=True)
     changed = frame.copy()
-    future_columns = [column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed]
+    future_columns = [
+        column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed
+    ]
     changed.loc[cutoff:, future_columns] = changed.loc[cutoff:, future_columns].astype(float) * 1000.0
     altered = build_features(changed).iloc[:cutoff].reset_index(drop=True)
     assert_frame_equal(baseline, altered, check_exact=False, rtol=1e-6, atol=1e-6)

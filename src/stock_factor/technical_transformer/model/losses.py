@@ -17,7 +17,9 @@ def _masked_huber(pred: torch.Tensor, target: torch.Tensor, valid: torch.Tensor 
     return F.huber_loss(pred[mask], target[mask], delta=1.0)
 
 
-def _soft_cross_entropy(logits: torch.Tensor, soft_target: torch.Tensor, valid: torch.Tensor | None = None) -> torch.Tensor:
+def _soft_cross_entropy(
+    logits: torch.Tensor, soft_target: torch.Tensor, valid: torch.Tensor | None = None
+) -> torch.Tensor:
     values = (-soft_target * F.log_softmax(logits, dim=-1)).sum(dim=-1)
     if valid is not None:
         mask = valid.to(dtype=torch.bool)
@@ -27,7 +29,9 @@ def _soft_cross_entropy(logits: torch.Tensor, soft_target: torch.Tensor, valid: 
     return values.mean() if values.numel() else logits.sum() * 0.0
 
 
-def event_pos_weight(labels: torch.Tensor, label_valid: torch.Tensor | None = None, *, cap: float = 20.0) -> torch.Tensor:
+def event_pos_weight(
+    labels: torch.Tensor, label_valid: torch.Tensor | None = None, *, cap: float = 20.0
+) -> torch.Tensor:
     """Compute capped negative/positive weights without balancing eval data."""
     if label_valid is None:
         label_valid = torch.ones_like(labels, dtype=torch.bool)
@@ -70,14 +74,19 @@ def compute_loss(
             losses["bollinger"] = _masked_huber(outputs["bollinger"], labels[:, slices["bollinger"]], valid)
         if "wyckoff_primitives" in requested:
             valid = label_valid[:, slices["wyckoff_primitives"]] if label_valid is not None else None
-            losses["wyckoff_primitives"] = _masked_huber(outputs["wyckoff_primitives"], labels[:, slices["wyckoff_primitives"]], valid)
+            losses["wyckoff_primitives"] = _masked_huber(
+                outputs["wyckoff_primitives"], labels[:, slices["wyckoff_primitives"]], valid
+            )
         if "phase" in requested:
             valid = label_valid[:, slices["phase"]] if label_valid is not None else None
             losses["phase"] = _soft_cross_entropy(outputs["phase"], labels[:, slices["phase"]], valid)
         if "events" in requested:
             valid = label_valid[:, slices["events"]] if label_valid is not None else None
             values = F.binary_cross_entropy_with_logits(
-                outputs["events"], labels[:, slices["events"]], pos_weight=event_weight, reduction="none",
+                outputs["events"],
+                labels[:, slices["events"]],
+                pos_weight=event_weight,
+                reduction="none",
             )
             if valid is not None:
                 values = values[valid.to(dtype=torch.bool)]

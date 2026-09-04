@@ -1,0 +1,25 @@
+{
+  "version": "stock-factor-benchmark.v1",
+  "seed": 20260904,
+  "budgets": {
+    "dataset_build_seconds": 30,
+    "candidate_evaluation_seconds": 30,
+    "oos_seconds": 30,
+    "transformer_inference_seconds": 30
+  },
+  "tasks": [
+    "dataset_build",
+    "candidate_evaluation",
+    "oos",
+    "transformer_inference"
+  ],
+  "candidate_order": ["candidate-001", "candidate-002", "candidate-003"],
+  "multiple_testing_universe": ["candidate-001", "candidate-002", "candidate-003"],
+  "statistical_scope": "candidate-universe-v1",
+  "expected_artifact_hashes": {
+    "dataset_build": "52a8f12d46d0629da12ca8f8a39b1ac45df71123aa76e9743fbb03a6e4529c2f",
+    "candidate_evaluation": "0bb9526375caa816b7b031598f8229e5f36eaade1651d1f11b95f4bfd27d5d8d",
+    "oos": "b3a630e3456beb8fa7faf577eaa03cc9d79720b10ddfb4349559a6cbb8712869",
+    "transformer_inference": "9761725681b5b3bac860ddd2864429bb948def9b0294818e10a901c17220afb8"
+  }
+}

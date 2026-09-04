@@ -1,0 +1,33 @@
+schema_version: config-artifact.v1
+config_id: model_promotion_v1
+checksum: sha256:35263df941ba7c2a45091ce15780d20e26ae2e4426d8cc770b53b5cf32b57c90
+environment: shared
+
+version: model-promotion.v1
+required_report_mode: PRODUCTION
+required_reliability_status: PASS
+required_evidence:
+  - gold_set
+  - baseline
+  - causality
+  - embedding_probe
+  - invariance
+  - double_oos
+hardware_tolerances:
+  cpu:
+    tolerance_abs: 0.000001
+    tolerance_rel: 0.00001
+    allow_cross_device: false
+  cuda:
+    tolerance_abs: 0.00001
+    tolerance_rel: 0.0001
+    allow_cross_device: false
+hardware_cross_tolerances:
+  cpu:
+    cuda:
+      tolerance_abs: 0.0001
+      tolerance_rel: 0.001
+  cuda:
+    cpu:
+      tolerance_abs: 0.0001
+      tolerance_rel: 0.001

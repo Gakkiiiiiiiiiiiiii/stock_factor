@@ -4,6 +4,7 @@
 - 已消费/缺失/失效的授权禁止再次评估；
 - FinalOosEvaluationService 接入授权存储后双重评估被拒绝。
 """
+
 from __future__ import annotations
 
 import threading
@@ -34,7 +35,9 @@ def pg_store(tmp_path):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    engine = create_engine(f"sqlite:///{(tmp_path / 'factor.db').as_posix()}", connect_args={"check_same_thread": False})
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'factor.db').as_posix()}", connect_args={"check_same_thread": False}
+    )
     Base.metadata.create_all(engine)
     return PostgresOosAuthorizationStore(sessionmaker(engine, expire_on_commit=False))
 
@@ -105,7 +108,9 @@ def test_evaluation_service_consumes_authorization_once():
         final_oos_snapshot_id="mds-oos-x",
     )
     service.freeze_candidate(freeze)
-    split = FactorResearchSplit(warmup_start=0, discovery_start=10, discovery_end=80, final_oos_start=80, final_oos_end=100)
+    split = FactorResearchSplit(
+        warmup_start=0, discovery_start=10, discovery_end=80, final_oos_start=80, final_oos_end=100
+    )
     rng = np.random.default_rng(3)
     values = rng.normal(size=(20, 120))
     closes = 10 * np.exp(np.cumsum(rng.normal(0.0, 0.02, size=(20, 120)), axis=1))
@@ -125,7 +130,9 @@ def test_evaluation_without_authorization_record_rejected():
     seal = InMemoryCandidateSealStore()
     service = FinalOosEvaluationService(seal, authorizations=InMemoryOosAuthorizationStore())
     experiment = _experiment_at_authorized()
-    split = FactorResearchSplit(warmup_start=0, discovery_start=10, discovery_end=80, final_oos_start=80, final_oos_end=100)
+    split = FactorResearchSplit(
+        warmup_start=0, discovery_start=10, discovery_end=80, final_oos_start=80, final_oos_end=100
+    )
     values = np.ones((20, 120))
     closes = np.linspace(10, 12, 120)[None, :].repeat(20, axis=0)
     with pytest.raises(FinalOosAuthorizationError):

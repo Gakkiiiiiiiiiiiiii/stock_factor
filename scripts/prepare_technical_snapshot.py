@@ -36,7 +36,10 @@ def prepare(args: argparse.Namespace) -> QuantSnapshot:
     bars = pd.merge_asof(
         bars.sort_values(["trading_date", "symbol"]),
         capital[["symbol", "announce_date", "circulating_capital"]].sort_values(["announce_date", "symbol"]),
-        left_on="trading_date", right_on="announce_date", by="symbol", direction="backward",
+        left_on="trading_date",
+        right_on="announce_date",
+        by="symbol",
+        direction="backward",
     )
     bars["turnover"] = bars["volume"].astype(float) / bars["circulating_capital"].astype(float)
     bars["turnover_observed"] = bars["turnover"].notna().astype(float)
@@ -75,12 +78,7 @@ def prepare(args: argparse.Namespace) -> QuantSnapshot:
         & (~price_present | (bars["low"] <= bars[["open", "close"]].min(axis=1)))
         & (~price_present | (bars["high"] >= bars["low"]))
     )
-    checks = (
-        ohlc_checks
-        & (bars["volume"] >= 0)
-        & (bars["amount"] >= 0)
-        & (bars["turnover"] >= 0)
-    )
+    checks = ohlc_checks & (bars["volume"] >= 0) & (bars["amount"] >= 0) & (bars["turnover"] >= 0)
     if not checks.all():
         raise ValueError(f"OHLC/volume/turnover quality check failed for {(~checks).sum()} rows")
     if bars["turnover"].isna().any():

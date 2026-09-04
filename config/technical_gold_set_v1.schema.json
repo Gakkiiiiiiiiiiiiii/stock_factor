@@ -1,0 +1,32 @@
+{
+  "config_id": "technical_gold_set_v1",
+  "checksum": "sha256:28938bb61f57da7d054b7e43fcfecaf31a10f36dfb05a40e7e617ec56785673a",
+  "environment": "shared",
+  "schema_version": "technical-gold-set.v1",
+  "path": "artifacts/gold_sets/wyckoff_v1",
+  "record_fields": {
+    "sample_id": "string",
+    "symbol": "string",
+    "as_of": "YYYY-MM-DD",
+    "snapshot_id": "string",
+    "labels": "object",
+    "confidence": "number[0,1]",
+    "annotator_a": "string",
+    "annotator_b": "string",
+    "annotator_a_labels": "object",
+    "annotator_b_labels": "object",
+    "notes": "string"
+  },
+  "required_events": ["spring", "upthrust", "sc", "bc"],
+  "recommended_counts": {
+    "spring_like": 200,
+    "upthrust_like": 200,
+    "sc_like": 150,
+    "bc_like": 150,
+    "sos_like": 200,
+    "sow_like": 200,
+    "hard_negatives": "800-1500"
+  },
+  "kappa_min": 0.60,
+  "training_usage": "forbidden"
+}

@@ -80,7 +80,12 @@ def test_model_second_round_receives_structured_feedback_and_previous_formula():
     model = FeedbackModel()
     service = FactorMiningService(FixtureMarket(), FixtureContent(), FixtureFactors(), model)
     result = service.run(
-        {"symbols": [f"6000{index:02d}" for index in range(20)], "use_model": True, "rounds": 2, "candidates_per_round": 1}
+        {
+            "symbols": [f"6000{index:02d}" for index in range(20)],
+            "use_model": True,
+            "rounds": 2,
+            "candidates_per_round": 1,
+        }
     )
     assert len(model.prompts) == 2
     assert "structured feedback" in model.prompts[1]
@@ -89,8 +94,16 @@ def test_model_second_round_receives_structured_feedback_and_previous_formula():
 
 
 def test_near_identical_factor_outputs_are_kept_once_for_statistics():
-    first = {"candidate": {"candidate_hash": "a"}, "values": __import__("numpy").arange(20).reshape(2, 10), "preliminary": {"fitness": 1.0}}
-    duplicate = {"candidate": {"candidate_hash": "b"}, "values": __import__("numpy").arange(20).reshape(2, 10) * 2, "preliminary": {"fitness": 0.5}}
+    first = {
+        "candidate": {"candidate_hash": "a"},
+        "values": __import__("numpy").arange(20).reshape(2, 10),
+        "preliminary": {"fitness": 1.0},
+    }
+    duplicate = {
+        "candidate": {"candidate_hash": "b"},
+        "values": __import__("numpy").arange(20).reshape(2, 10) * 2,
+        "preliminary": {"fitness": 0.5},
+    }
     kept, rejected = FactorMiningService._correlation_deduplicate([duplicate, first])
     assert [item["candidate"]["candidate_hash"] for item in kept] == ["a"]
     assert rejected == [{"candidate_hash": "b", "representative": "a"}]

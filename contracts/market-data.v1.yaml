@@ -1,4 +1,4 @@
-# market-data.v1 消费者副本（设计文档 §7 / §12 / §76）
+# market-data.v1 exploratory compatibility consumer (formal path is market-snapshot.v1).
 # Producer: quant（唯一事实源）   Consumer: stock_factor
 # 注意：本文件是 quant/contracts/market-data.v1.yaml 的消费方镜像，
 # 修改必须以 quant 仓库中的正本为准（§30 Contract Source of Truth）。
@@ -9,7 +9,7 @@ consumer_configuration:
   env: MARKET_DATA_SERVICE_URL
   default: http://quant:8011
   primary_path: POST /api/v1/market/bars/batch
-  legacy_fallback_path: POST /v1/bars/batch   # 迁移期兼容（§12）
+  legacy_fallback_path: POST /v1/bars/batch   # exploratory compatibility only
 response_requirements:
   - contract_version == market-data.v1
   - data.symbols / data.dates / data.bars / data.data_version / data.data_snapshot_id 必须齐全

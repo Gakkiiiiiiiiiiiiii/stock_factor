@@ -1,4 +1,5 @@
 """Promotion Gate v2 与生命周期状态机（详细修改方案 §10 / §14）。"""
+
 from __future__ import annotations
 
 import pytest

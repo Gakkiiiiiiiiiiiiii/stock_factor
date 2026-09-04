@@ -15,4 +15,3 @@ def test_mixed_mask_is_non_empty() -> None:
 def test_each_structured_mask_mode_is_non_empty() -> None:
     x = torch.randn(2, 128, len(FEATURE_NAMES))
     assert all(apply_mask(x, mode=mode, seed=7).positions.any() for mode in ("day", "group", "span"))
-

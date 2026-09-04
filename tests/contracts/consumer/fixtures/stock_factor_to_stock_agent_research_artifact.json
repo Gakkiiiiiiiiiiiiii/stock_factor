@@ -1,0 +1,32 @@
+{
+  "producer": "stock_factor",
+  "consumer": "stock_agent",
+  "request": {"contract_version": "research-artifact.v2", "artifact_id": "38653232aeb9ff25c76848b75e107d13ccaed59afd83074f00997583492c5164"},
+  "response": {
+    "artifact_id": "38653232aeb9ff25c76848b75e107d13ccaed59afd83074f00997583492c5164",
+    "artifact_status": "SEALED",
+    "candidate_set_hash": "536da99900c368b5b3c83de2a8b46652579a820faea303270d9ddd07a0d78b88",
+    "content_ref": {"content_snapshot_id": "content-fixture", "ref_hash": "f22da2b4781ac3a4f60eefa83fe259e40e8f2829b03ce9ec2eda161cdcab9037"},
+    "contract_checksums": {
+      "content-factor-signal.v5.1": "sha256:dff5c05a29df5f50245b2b44d328204a583b8272174b23fc329db45f87c0f7d8",
+      "factor.v1": "sha256:7607c708044abb1116954c3b20cd1cc3409cd3362ac817cc0d6847f785b4c105",
+      "market-snapshot.v1": "sha256:7d9afbec076c8bee81ef3c3854794f50a0ba302198fecbe871009cdbdf9dd034",
+      "research-artifact.v2": "sha256:17a4e28274a72e9f363977d534afc60b067f14011b1d4c149e0b7ceb8110debb"
+    },
+    "contract_version": "research-artifact.v2",
+    "created_at": "2026-08-10T00:00:00Z",
+    "dataset_manifest": {"universe": "universe-v1"},
+    "dependency_lock_hash": "a80d29fe8152081b1cfc90228bdd68823f43cf8fffb1da22b963e88ea807d69d",
+    "experiment_id": "exp-fixture",
+    "final_oos_evidence": {"cohort_artifact_hash": "16accdf4ccc09faa5795285f06e167024b4b8c61ed48f7deb0a9b82ef4d6ec9c", "run_id": "run-fixture", "status": "SEALED"},
+    "hypothesis": "Fixture remains deterministic",
+    "market_ref": {"market_snapshot_id": "market-fixture", "ref_hash": "d49d2d9fe702d762d85fce9b74305e9fab4aa013cdd570625320b580218126f3"},
+    "producer_commit": "stock_factor@fixture",
+    "promotion_decision": {"passed": true},
+    "promotion_policy_version": "policy-v1",
+    "readiness_evidence": {"ready": true, "runtime_profile": "PROD", "checks": {"formal_inputs": true}, "blocking_reasons": [], "threshold_version": "readiness_v1", "frozen_at": "2026-08-10T00:00:00Z", "evidence_hash": "6666666666666666666666666666666666666666666666666666666666666666"},
+    "research_question": "Does fixture pass?",
+    "statistical_experiment": {"dsr": {"passed": true}, "multiple_testing": {"method": "holm"}, "pbo": {"passed": true}},
+    "tradability_assessment": {"formal_eligible": true, "gate_result": {"passed": true}, "reference": "tradability-fixture"}
+  }
+}

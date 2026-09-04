@@ -4,6 +4,7 @@ Discovery 完成后、Final OOS 之前选择唯一（或少量 pre-registered）
 排序只允许使用 Discovery 证据（gate / fitness / walkforward），
 保证“只修改 OOS Dataset 不会改变 Finalist”（§25 / §79）。
 """
+
 from __future__ import annotations
 
 MAX_FINALIST_COUNT = 3

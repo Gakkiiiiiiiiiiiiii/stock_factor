@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,10 +16,20 @@ class SnapshotError(RuntimeError):
 
 BAR_COLUMNS = ["open", "high", "low", "close", "volume", "amount", "turnover"]
 PIT_COLUMNS = [
-    "is_suspended", "is_st", "is_star_st", "is_delisting", "listing_days",
-    "is_limit_up", "is_limit_down", "st_observed", "suspension_observed",
-    "limit_observed", "delisting_observed", "turnover_observed",
-    "price_observed", "volume_observed",
+    "is_suspended",
+    "is_st",
+    "is_star_st",
+    "is_delisting",
+    "listing_days",
+    "is_limit_up",
+    "is_limit_down",
+    "st_observed",
+    "suspension_observed",
+    "limit_observed",
+    "delisting_observed",
+    "turnover_observed",
+    "price_observed",
+    "volume_observed",
 ]
 
 
@@ -110,7 +120,10 @@ def write_quant_snapshot(
     ordered = ordered.sort_values(["symbol", "trading_date"]).reset_index(drop=True)
     content = json.dumps(
         ordered.astype(object).where(ordered.notna(), None).values.tolist(),
-        ensure_ascii=False, sort_keys=False, separators=(",", ":"), default=str,
+        ensure_ascii=False,
+        sort_keys=False,
+        separators=(",", ":"),
+        default=str,
     ).encode("utf-8")
     content_hash = hashlib.sha256(content).hexdigest()
     final_id = snapshot_id or f"mds-{content_hash}"

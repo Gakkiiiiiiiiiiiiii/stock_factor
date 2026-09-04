@@ -1,0 +1,67 @@
+# Central inventory for formal cross-service contracts.
+# Checksums cover the exact bytes of the checked-in schema files.  A producer
+# change must update this manifest in the same reviewed change and pass the CDC
+# workflow before it can be merged.
+manifest_version: platform-contract-manifest.v1
+owner: factor-platform
+contracts:
+  - name: content-factor-signal.v5.1
+    schema: contracts/content-factor-signal.v5.1.json
+    producer: stock_content
+    consumers: [stock_factor]
+    checksum: sha256:dff5c05a29df5f50245b2b44d328204a583b8272174b23fc329db45f87c0f7d8
+    compatibility: backward
+    deprecated_at: null
+    sunset_at: null
+    owner: content-platform
+    formal: true
+  - name: factor.v1
+    schema: contracts/factor.v1.json
+    producer: stock_factor
+    consumers: [stock_agent]
+    checksum: sha256:7607c708044abb1116954c3b20cd1cc3409cd3362ac817cc0d6847f785b4c105
+    compatibility: backward
+    deprecated_at: null
+    sunset_at: null
+    owner: factor-platform
+    formal: true
+  - name: market-snapshot.v1
+    schema: contracts/market-snapshot.v1.json
+    producer: quant
+    consumers: [stock_factor]
+    checksum: sha256:7d9afbec076c8bee81ef3c3854794f50a0ba302198fecbe871009cdbdf9dd034
+    compatibility: backward
+    deprecated_at: null
+    sunset_at: null
+    owner: quant-platform
+    formal: true
+  - name: model-artifact.v1
+    schema: contracts/model-artifact.v1.json
+    producer: stock_factor
+    consumers: [stock_agent]
+    checksum: sha256:05351d27280543a077c6305dc9ae2301bc83df19bed0cc65e7b35e8e4aa6ea0b
+    compatibility: backward
+    deprecated_at: null
+    sunset_at: null
+    owner: factor-platform
+    formal: true
+  - name: paper-account.v1
+    schema: contracts/paper-account.v1.json
+    producer: quant
+    consumers: [stock_factor]
+    checksum: sha256:07c1304f15c202af966fc407aa95257de44cb2ec0b57e3eb40f91a51868b1651
+    compatibility: backward
+    deprecated_at: null
+    sunset_at: null
+    owner: quant-platform
+    formal: true
+  - name: research-artifact.v2
+    schema: contracts/research-artifact.v2.json
+    producer: stock_factor
+    consumers: [stock_agent]
+    checksum: sha256:17a4e28274a72e9f363977d534afc60b067f14011b1d4c149e0b7ceb8110debb
+    compatibility: backward
+    deprecated_at: null
+    sunset_at: null
+    owner: factor-platform
+    formal: true

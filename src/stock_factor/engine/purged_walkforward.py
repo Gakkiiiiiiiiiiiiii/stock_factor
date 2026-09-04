@@ -54,7 +54,12 @@ def run_purged_walkforward(
         )
     rank_ics = [float(item["metrics"].get("rank_ic") or 0.0) for item in windows]
     excess = [
-        float(item["metrics"].get("research_excess_return_proxy", item["metrics"].get("topk_excess_annual_return", item["metrics"].get("topk_excess_return") or 0.0)))
+        float(
+            item["metrics"].get(
+                "research_excess_return_proxy",
+                item["metrics"].get("topk_excess_annual_return", item["metrics"].get("topk_excess_return") or 0.0),
+            )
+        )
         for item in windows
     ]
     positive = [value > 0 for value in rank_ics]

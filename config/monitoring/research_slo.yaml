@@ -1,0 +1,43 @@
+schema_version: config-artifact.v1
+config_id: research_slo
+checksum: sha256:0ac4130c34556f5817a5253598e13cfbffce614ec25dc578f4f2057b385a7768
+environment: shared
+
+version: research-slo-v1
+metrics:
+  - dataset_build_latency_seconds
+  - mining_latency_seconds
+  - oos_latency_seconds
+  - artifact_sealing_latency_seconds
+  - research_error_total
+  - research_queue_depth
+  - dataset_freshness_seconds
+  - research_readiness
+alerts:
+  - name: research-readiness-blocked
+    metric: research_readiness
+    condition: "status == not_ready"
+    for: 10m
+  - name: research-queue-saturation
+    metric: research_queue_depth
+    condition: "> 100"
+    for: 5m
+  - name: research-dataset-stale
+    metric: dataset_freshness_seconds
+    condition: "> 86400"
+    for: 10m
+  - name: research-error-budget
+    metric: research_error_total
+    condition: "> 5"
+    for: 15m
+dashboard:
+  title: Research readiness and SLO
+  panels:
+    - metric: research_readiness
+      group_by: [profile, mode, status]
+    - metric: research_queue_depth
+      group_by: [profile]
+    - metric: dataset_freshness_seconds
+      group_by: [profile, dependency]
+    - metric: mining_latency_seconds
+      group_by: [profile, mode, stage]

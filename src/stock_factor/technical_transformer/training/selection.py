@@ -31,11 +31,16 @@ def select_stage_score(stage: str, metrics: dict[str, Any]) -> StageSelectionRes
         selected = {"ma": components["ma"], "boll": components["boll"], "primitive": components["primitive"]}
     elif name == "wyckoff_phase_events":
         score = (
-            0.10 * components["ma"] + 0.10 * components["boll"] + 0.20 * components["primitive"]
-            + 0.25 * components["phase"] + 0.35 * components["event"]
+            0.10 * components["ma"]
+            + 0.10 * components["boll"]
+            + 0.20 * components["primitive"]
+            + 0.25 * components["phase"]
+            + 0.35 * components["event"]
         )
         selected = components
     else:
         raise ValueError(f"unknown training stage: {stage}")
     valid = all(value is not None for value in selected.values())
-    return StageSelectionResult(name, float(score) if valid else float("-inf"), {key: float(value) for key, value in selected.items()}, valid)
+    return StageSelectionResult(
+        name, float(score) if valid else float("-inf"), {key: float(value) for key, value in selected.items()}, valid
+    )

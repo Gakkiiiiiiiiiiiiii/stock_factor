@@ -10,9 +10,10 @@ from typing import Any
 
 import numpy as np
 import torch
-import yaml
 from torch import nn
 from torch.utils.data import DataLoader
+
+from stock_factor.config.schema import load_config
 
 from ..data.dataset import DatasetConfig, TechnicalWindowDataset, build_dataset
 from ..data.schemas import FEATURE_NAMES, FEATURE_SCHEMA, LABEL_SCHEMA, MASK_RECONSTRUCTION_FEATURES
@@ -33,9 +34,12 @@ class TechnicalTransformerSystem(nn.Module):
         super().__init__()
         self.encoder = TechnicalTransformer(
             input_dim=int(model_config.get("input_dim", len(FEATURE_NAMES))),
-            hidden_size=int(model_config.get("hidden_size", 384)), layers=int(model_config.get("layers", 6)),
-            heads=int(model_config.get("heads", 8)), ffn_size=int(model_config.get("ffn_size", 1536)),
-            dropout=float(model_config.get("dropout", 0.10)), embedding_dim=int(model_config.get("embedding_dim", 256)),
+            hidden_size=int(model_config.get("hidden_size", 384)),
+            layers=int(model_config.get("layers", 6)),
+            heads=int(model_config.get("heads", 8)),
+            ffn_size=int(model_config.get("ffn_size", 1536)),
+            dropout=float(model_config.get("dropout", 0.10)),
+            embedding_dim=int(model_config.get("embedding_dim", 256)),
             sequence_length=int(model_config.get("sequence_length", 128)),
         )
         self.heads = TechnicalHeads(hidden_size=self.encoder.hidden_size)
@@ -62,9 +66,16 @@ def seed_everything(seed: int) -> None:
     torch.backends.cudnn.benchmark = False
 
 
-def _collate(batch: list[tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
+def _collate(
+    batch: list[tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
     x, y, valid, metadata = zip(*batch)
-    return torch.from_numpy(np.stack(x)), torch.from_numpy(np.stack(y)), torch.from_numpy(np.stack(valid)), list(metadata)
+    return (
+        torch.from_numpy(np.stack(x)),
+        torch.from_numpy(np.stack(y)),
+        torch.from_numpy(np.stack(valid)),
+        list(metadata),
+    )
 
 
 def _git_commit() -> str:
@@ -84,7 +95,10 @@ def _load_dataset(config: dict[str, Any], snapshot: QuantSnapshot) -> dict[str, 
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("source_market_snapshot_id") != snapshot.snapshot_id:
         raise RuntimeError("dataset snapshot identity does not match training snapshot_id")
-    if manifest.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"] or manifest.get("label_schema_version") != LABEL_SCHEMA.version:
+    if (
+        manifest.get("feature_schema_version") != FEATURE_SCHEMA["schema_version"]
+        or manifest.get("label_schema_version") != LABEL_SCHEMA.version
+    ):
         raise RuntimeError("dataset schema is not Technical Transformer V2; rebuild the dataset before training")
     return manifest
 
@@ -122,42 +136,75 @@ def _save_checkpoint(
     state = {key: value.detach().cpu() for key, value in model.state_dict().items()}
     try:
         from safetensors.torch import save_file
+
         save_file(state, str(directory / "model.safetensors"))
     except ImportError:
         torch.save(state, directory / "model.pt")
     training_config = dict(config)
-    training_config.setdefault("training", {})["effective_batch_size"] = int(config.get("training", {}).get("batch_size", 32)) * int(config.get("training", {}).get("gradient_accumulation", 1))
+    training_config.setdefault("training", {})["effective_batch_size"] = int(
+        config.get("training", {}).get("batch_size", 32)
+    ) * int(config.get("training", {}).get("gradient_accumulation", 1))
     training_config["training"]["optimizer_steps"] = int(optimizer_steps)
     training_config["training"]["optimizer_group_lrs"] = optimizer_group_lrs(optimizer)
     (directory / "model_config.json").write_text(json.dumps(config.get("model", {}), indent=2), encoding="utf-8")
-    (directory / "training_config.json").write_text(json.dumps(training_config, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    (directory / "feature_schema.json").write_text(json.dumps(FEATURE_SCHEMA, ensure_ascii=False, indent=2), encoding="utf-8")
-    (directory / "label_schema.json").write_text(json.dumps(LABEL_SCHEMA.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-    (directory / "dataset_manifest.json").write_text(json.dumps(dataset_manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    (directory / "quant_snapshot_manifest.json").write_text(json.dumps(snapshot.manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-    (directory / "validation_metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    (directory / "training_config.json").write_text(
+        json.dumps(training_config, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    (directory / "feature_schema.json").write_text(
+        json.dumps(FEATURE_SCHEMA, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (directory / "label_schema.json").write_text(
+        json.dumps(LABEL_SCHEMA.as_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (directory / "dataset_manifest.json").write_text(
+        json.dumps(dataset_manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    (directory / "quant_snapshot_manifest.json").write_text(
+        json.dumps(snapshot.manifest, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
+    (directory / "validation_metrics.json").write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+    )
     identity = {
-        "manifest_version": "technical-checkpoint.v2", "checkpoint_id": checkpoint_id, "model_version": "technical-transformer.v1-reliability-v2",
-        "checkpoint_status": "CANDIDATE", "stage": stage.name, "epoch": epoch, "best_valid": best_valid,
-        "git_commit": _git_commit(), "dataset_id": dataset_manifest.get("dataset_id"),
-        "market_snapshot_id": snapshot.snapshot_id, "seed": config.get("training", {}).get("seed", 42),
-        "feature_schema_hash": dataset_manifest.get("feature_schema_hash"), "label_schema_hash": dataset_manifest.get("label_schema_hash"),
-        "torch_version": torch.__version__, "cuda_version": torch.version.cuda,
-        "device": next(model.parameters()).device.type, "created_at": datetime.now(timezone.utc).isoformat(),
+        "manifest_version": "technical-checkpoint.v2",
+        "checkpoint_id": checkpoint_id,
+        "model_version": "technical-transformer.v1-reliability-v2",
+        "checkpoint_status": "CANDIDATE",
+        "stage": stage.name,
+        "epoch": epoch,
+        "best_valid": best_valid,
+        "git_commit": _git_commit(),
+        "dataset_id": dataset_manifest.get("dataset_id"),
+        "market_snapshot_id": snapshot.snapshot_id,
+        "seed": config.get("training", {}).get("seed", 42),
+        "feature_schema_hash": dataset_manifest.get("feature_schema_hash"),
+        "label_schema_hash": dataset_manifest.get("label_schema_hash"),
+        "torch_version": torch.__version__,
+        "cuda_version": torch.version.cuda,
+        "device": next(model.parameters()).device.type,
+        "created_at": datetime.now(timezone.utc).isoformat(),
         "training": {
             "batch_size": int(config.get("training", {}).get("batch_size", 32)),
             "gradient_accumulation": int(config.get("training", {}).get("gradient_accumulation", 1)),
-            "effective_batch_size": int(config.get("training", {}).get("batch_size", 32)) * int(config.get("training", {}).get("gradient_accumulation", 1)),
-            "optimizer_steps": int(optimizer_steps), "optimizer_group_lrs": optimizer_group_lrs(optimizer),
+            "effective_batch_size": int(config.get("training", {}).get("batch_size", 32))
+            * int(config.get("training", {}).get("gradient_accumulation", 1)),
+            "optimizer_steps": int(optimizer_steps),
+            "optimizer_group_lrs": optimizer_group_lrs(optimizer),
         },
         "validation": {"report_id": f"{checkpoint_id}:valid", "best_valid": best_valid},
         "selection": {
-            "policy_version": "technical-selection.v1", "stage": selection.stage,
-            "score": selection.score, "components": selection.components, "valid": selection.valid,
+            "policy_version": "technical-selection.v1",
+            "stage": selection.stage,
+            "score": selection.score,
+            "components": selection.components,
+            "valid": selection.valid,
         },
-        "test": {"executed": False}, "reliability_gate": {"status": "NOT_EVALUATED"},
+        "test": {"executed": False},
+        "reliability_gate": {"status": "NOT_EVALUATED"},
     }
-    (directory / "checkpoint_manifest.json").write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8")
+    (directory / "checkpoint_manifest.json").write_text(
+        json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return directory
 
 
@@ -175,7 +222,13 @@ def _evaluate(
     model.eval()
     sums: dict[str, float] = {}
     count = 0
-    predictions: dict[str, list[np.ndarray]] = {"ma": [], "bollinger": [], "wyckoff_primitives": [], "phase": [], "events": []}
+    predictions: dict[str, list[np.ndarray]] = {
+        "ma": [],
+        "bollinger": [],
+        "wyckoff_primitives": [],
+        "phase": [],
+        "events": [],
+    }
     targets: list[np.ndarray] = []
     valid_targets: list[np.ndarray] = []
     empty_mask_batches = 0
@@ -195,8 +248,11 @@ def _evaluate(
             feature_validity = torch.ones_like(x, dtype=torch.bool)
             feature_validity[..., FEATURE_NAMES.index("turnover")] = x[..., turnover_index] > 0
             masked = apply_mask(
-                x, valid_days=valid_days, feature_validity=feature_validity,
-                mode=stage.mask_mode or "mixed", seed=seed + batch_index,
+                x,
+                valid_days=valid_days,
+                feature_validity=feature_validity,
+                mode=stage.mask_mode or "mixed",
+                seed=seed + batch_index,
             )
             masked_feature_count += int(masked.positions.sum().item())
             masked_day_count += int(masked.positions.any(dim=-1).sum().item())
@@ -207,13 +263,19 @@ def _evaluate(
                 continue
             output = model(masked.input, mask_positions=masked.positions)
             target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
-            loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
+            loss = compute_mask_loss(
+                output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices
+            )
             items = {"mask": float(loss.cpu())}
         else:
             output = model(x)
             loss, items = compute_loss(
-                output, y, stage=stage.name, active_heads=stage.active_heads or None,
-                label_valid=label_valid, event_weight=event_weight,
+                output,
+                y,
+                stage=stage.name,
+                active_heads=stage.active_heads or None,
+                label_valid=label_valid,
+                event_weight=event_weight,
             )
             predictions["ma"].append(output["ma"].cpu().numpy())
             predictions["bollinger"].append(output["bollinger"].cpu().numpy())
@@ -228,10 +290,13 @@ def _evaluate(
         count += 1
     result: dict[str, Any] = {name: value / max(count, 1) for name, value in sums.items()}
     if targets:
-        result.update(evaluate_prediction_arrays(
-            np.concatenate(targets), {key: np.concatenate(value) for key, value in predictions.items()},
-            label_valid=np.concatenate(valid_targets),
-        ))
+        result.update(
+            evaluate_prediction_arrays(
+                np.concatenate(targets),
+                {key: np.concatenate(value) for key, value in predictions.items()},
+                label_valid=np.concatenate(valid_targets),
+            )
+        )
         result["technical_composite"] = technical_composite(result)
     if stage.name == "masked_pretraining":
         result["masking"] = {
@@ -259,19 +324,37 @@ def train(config: dict[str, Any]) -> Path:
     seed = int(config.get("training", {}).get("seed", 42))
     seed_everything(seed)
     snapshot_cfg = config.get("source", {})
-    snapshot = QuantSnapshot.load(Path(snapshot_cfg["snapshot_root"]), str(snapshot_cfg["market_snapshot_id"]), require_qfq=True)
+    snapshot = QuantSnapshot.load(
+        Path(snapshot_cfg["snapshot_root"]), str(snapshot_cfg["market_snapshot_id"]), require_qfq=True
+    )
     snapshot.verify()
     dataset_manifest = _load_dataset(config, snapshot)
     dataset_dir = Path(config["dataset"]["path"])
-    device = torch.device("cuda" if torch.cuda.is_available() and config.get("hardware", {}).get("device", "auto") != "cpu" else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() and config.get("hardware", {}).get("device", "auto") != "cpu" else "cpu"
+    )
     model = TechnicalTransformerSystem(config.get("model", {})).to(device)
     train_dataset = TechnicalWindowDataset(dataset_dir, "train")
     valid_dataset = TechnicalWindowDataset(dataset_dir, "valid")
     batch_size = int(config.get("training", {}).get("batch_size", 32))
     accumulation = max(1, int(config.get("training", {}).get("gradient_accumulation", 1)))
     num_workers = int(config.get("training", {}).get("num_workers", 0))
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=device.type == "cuda", collate_fn=_collate)
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=device.type == "cuda", collate_fn=_collate)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=device.type == "cuda",
+        collate_fn=_collate,
+    )
+    valid_loader = DataLoader(
+        valid_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=device.type == "cuda",
+        collate_fn=_collate,
+    )
     output_root = Path(config.get("checkpoint", {}).get("root", "artifacts/models/technical"))
     output_root.mkdir(parents=True, exist_ok=True)
     stages = config.get("training", {}).get("run_stages") or [item["name"] for item in config.get("stages", [])]
@@ -284,10 +367,15 @@ def train(config: dict[str, Any]) -> Path:
             probe_x = probe_batch[0].to(device)
             probe_valid_days = probe_x[..., FEATURE_NAMES.index("quality_mask")] > 0
             probe_feature_validity = torch.ones_like(probe_x, dtype=torch.bool)
-            probe_feature_validity[..., FEATURE_NAMES.index("turnover")] = probe_x[..., FEATURE_NAMES.index("turnover_observed")] > 0
+            probe_feature_validity[..., FEATURE_NAMES.index("turnover")] = (
+                probe_x[..., FEATURE_NAMES.index("turnover_observed")] > 0
+            )
             probe_mask = apply_mask(
-                probe_x, valid_days=probe_valid_days, feature_validity=probe_feature_validity,
-                mode=stage.mask_mode or "mixed", seed=seed,
+                probe_x,
+                valid_days=probe_valid_days,
+                feature_validity=probe_feature_validity,
+                mode=stage.mask_mode or "mixed",
+                seed=seed,
             )
             if not probe_mask.positions.any():
                 raise RuntimeError("masked pretraining produced no masked positions")
@@ -308,8 +396,19 @@ def train(config: dict[str, Any]) -> Path:
             valid_feature_count = 0
             valid_day_count = 0
             optimizer.zero_grad(set_to_none=True)
-            configured_max_steps = next((item.get("max_steps_per_epoch") for item in config.get("stages", []) if item.get("name") == stage.name), None)
-            limit = min(len(train_loader), int(configured_max_steps)) if configured_max_steps is not None else len(train_loader)
+            configured_max_steps = next(
+                (
+                    item.get("max_steps_per_epoch")
+                    for item in config.get("stages", [])
+                    if item.get("name") == stage.name
+                ),
+                None,
+            )
+            limit = (
+                min(len(train_loader), int(configured_max_steps))
+                if configured_max_steps is not None
+                else len(train_loader)
+            )
             for step, (x, y, label_valid, _) in enumerate(train_loader):
                 if step >= limit:
                     break
@@ -323,8 +422,11 @@ def train(config: dict[str, Any]) -> Path:
                         feature_validity = torch.ones_like(x, dtype=torch.bool)
                         feature_validity[..., FEATURE_NAMES.index("turnover")] = x[..., turnover_index] > 0
                         masked = apply_mask(
-                            x, valid_days=valid_days, feature_validity=feature_validity,
-                            mode=stage.mask_mode or "mixed", seed=seed + epoch * 100000 + step,
+                            x,
+                            valid_days=valid_days,
+                            feature_validity=feature_validity,
+                            mode=stage.mask_mode or "mixed",
+                            seed=seed + epoch * 100000 + step,
                         )
                         masked_feature_count += int(masked.positions.sum().item())
                         masked_day_count += int(masked.positions.any(dim=-1).sum().item())
@@ -335,13 +437,19 @@ def train(config: dict[str, Any]) -> Path:
                             continue
                         output = model(masked.input, mask_positions=masked.positions)
                         target_indices = tuple(FEATURE_NAMES.index(name) for name in MASK_RECONSTRUCTION_FEATURES)
-                        raw_loss = compute_mask_loss(output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices)
+                        raw_loss = compute_mask_loss(
+                            output["mask_prediction"], masked.target, masked.positions, target_indices=target_indices
+                        )
                         items = {"mask": float(raw_loss.detach().cpu())}
                     else:
                         output = model(x)
                         raw_loss, items = compute_loss(
-                            output, y, stage=stage.name, active_heads=stage.active_heads or None,
-                            label_valid=label_valid, event_weight=event_weight,
+                            output,
+                            y,
+                            stage=stage.name,
+                            active_heads=stage.active_heads or None,
+                            label_valid=label_valid,
+                            event_weight=event_weight,
                         )
                     loss = raw_loss / accumulation
                 scaler.scale(loss).backward()
@@ -350,14 +458,27 @@ def train(config: dict[str, Any]) -> Path:
                 is_last = step + 1 == limit
                 if (step + 1) % accumulation == 0 or is_last:
                     scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(config.get("training", {}).get("grad_clip", 1.0)))
+                    torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), float(config.get("training", {}).get("grad_clip", 1.0))
+                    )
                     scaler.step(optimizer)
                     scaler.update()
                     optimizer.zero_grad(set_to_none=True)
                     optimizer_steps += 1
             validation = _evaluate(
-                model, valid_loader, device, stage, seed=seed + epoch * 1000,
-                max_batches=next((item.get("eval_max_batches") for item in config.get("stages", []) if item.get("name") == stage.name), None),
+                model,
+                valid_loader,
+                device,
+                stage,
+                seed=seed + epoch * 1000,
+                max_batches=next(
+                    (
+                        item.get("eval_max_batches")
+                        for item in config.get("stages", [])
+                        if item.get("name") == stage.name
+                    ),
+                    None,
+                ),
                 event_weight=event_weight,
             )
             metrics = {"stage": stage.name, "epoch": epoch, "train_loss": running / max(seen, 1), "valid": validation}
@@ -379,12 +500,34 @@ def train(config: dict[str, Any]) -> Path:
             else:
                 stale_epochs += 1
             checkpoint = _save_checkpoint(
-                model, output_root, config, snapshot, dataset_manifest, metrics, stage, epoch,
-                optimizer_steps=optimizer_steps, best_valid=improved, optimizer=optimizer, selection=selection,
+                model,
+                output_root,
+                config,
+                snapshot,
+                dataset_manifest,
+                metrics,
+                stage,
+                epoch,
+                optimizer_steps=optimizer_steps,
+                best_valid=improved,
+                optimizer=optimizer,
+                selection=selection,
             )
             if improved:
                 best_checkpoint = checkpoint
-            print(json.dumps({"checkpoint": str(checkpoint), **metrics, "selection_score": score, "best_so_far": improved, "optimizer_steps": optimizer_steps}, ensure_ascii=False), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "checkpoint": str(checkpoint),
+                        **metrics,
+                        "selection_score": score,
+                        "best_so_far": improved,
+                        "optimizer_steps": optimizer_steps,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             if stale_epochs >= stage.patience:
                 break
         if best_state is None or best_checkpoint is None:
@@ -400,7 +543,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train Technical Transformer V1 reliability candidate")
     parser.add_argument("--config", required=True)
     args = parser.parse_args()
-    config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")) or {}
+    config = load_config(args.config).payload
     print(train(config))
 
 

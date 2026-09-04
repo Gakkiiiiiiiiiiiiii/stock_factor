@@ -36,11 +36,20 @@ def synthetic_pattern(name: str, rows: int = 240, seed: int = 7) -> pd.DataFrame
     if name in {"spring", "upthrust", "boll_expansion"}:
         volume[-4:] *= 2.5
     dates = pd.date_range("2020-01-01", periods=rows, freq="B")
-    result = pd.DataFrame({
-        "trading_date": dates, "symbol": "SYN.SZ", "open": close - 0.5, "high": close + 1.0,
-        "low": close - 1.0, "close": close, "volume": volume, "amount": volume * close,
-        "turnover": 0.01, "listing_days": np.arange(1, rows + 1),
-    })
+    result = pd.DataFrame(
+        {
+            "trading_date": dates,
+            "symbol": "SYN.SZ",
+            "open": close - 0.5,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+            "volume": volume,
+            "amount": volume * close,
+            "turnover": 0.01,
+            "listing_days": np.arange(1, rows + 1),
+        }
+    )
     # Make the synthetic event occur on the first shock bar.  The label
     # generator compares that bar with the preceding range (which excludes
     # the shock itself).

@@ -13,7 +13,17 @@ def _score(split: dict[str, Any]) -> float | None:
     if value is not None:
         return float(value)
     try:
-        return float(sum((0.20 * technical_components(split)["ma"], 0.20 * technical_components(split)["boll"], 0.25 * technical_components(split)["primitive"], 0.15 * technical_components(split)["phase"], 0.20 * technical_components(split)["event"])))
+        return float(
+            sum(
+                (
+                    0.20 * technical_components(split)["ma"],
+                    0.20 * technical_components(split)["boll"],
+                    0.25 * technical_components(split)["primitive"],
+                    0.15 * technical_components(split)["phase"],
+                    0.20 * technical_components(split)["event"],
+                )
+            )
+        )
     except (TypeError, ValueError):
         return None
 
@@ -25,14 +35,22 @@ def _degradation(splits: dict[str, dict[str, Any]]) -> dict[str, Any]:
     if valid_score in (None, 0):
         result.update({name: None for name in ("time_degradation", "instrument_degradation", "double_oos_degradation")})
     else:
-        for split, output in (("time_test", "time_degradation"), ("instrument_test", "instrument_degradation"), ("double_oos", "double_oos_degradation")):
+        for split, output in (
+            ("time_test", "time_degradation"),
+            ("instrument_test", "instrument_degradation"),
+            ("double_oos", "double_oos_degradation"),
+        ):
             value = _score(splits.get(split) or {})
             result[output] = None if value is None else max(0.0, 1.0 - value / valid_score)
     valid_components = technical_components(valid) if valid else {}
     group_result: dict[str, Any] = {}
     for group in ("ma", "boll", "primitive", "phase", "event"):
         item: dict[str, Any] = {"valid_score": valid_components.get(group)}
-        for split, output in (("time_test", "time_degradation"), ("instrument_test", "instrument_degradation"), ("double_oos", "double_oos_degradation")):
+        for split, output in (
+            ("time_test", "time_degradation"),
+            ("instrument_test", "instrument_degradation"),
+            ("double_oos", "double_oos_degradation"),
+        ):
             test_components = technical_components(splits.get(split) or {})
             base = valid_components.get(group)
             value = test_components.get(group)
@@ -45,7 +63,21 @@ def _degradation(splits: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 
 def validate_reliability_report(report: dict[str, Any], *, production: bool | None = None) -> None:
-    required = {"report_version", "mode", "dataset", "checkpoint", "data_integrity", "validation_selection", "splits", "gold_set", "embedding", "invariance", "baseline", "oos", "reliability_gate"}
+    required = {
+        "report_version",
+        "mode",
+        "dataset",
+        "checkpoint",
+        "data_integrity",
+        "validation_selection",
+        "splits",
+        "gold_set",
+        "embedding",
+        "invariance",
+        "baseline",
+        "oos",
+        "reliability_gate",
+    }
     missing = sorted(required - set(report))
     if missing:
         raise ValueError(f"reliability report missing required fields: {missing}")
@@ -77,15 +109,21 @@ def build_reliability_report(
 ) -> dict[str, Any]:
     normalized_mode = str(mode).upper()
     report: dict[str, Any] = {
-        "report_version": "technical-reliability-report.v2", "mode": normalized_mode,
+        "report_version": "technical-reliability-report.v2",
+        "mode": normalized_mode,
         "required_evidence": {
-            "causality": normalized_mode == "PRODUCTION", "gold_set": normalized_mode == "PRODUCTION",
-            "embedding_probe": normalized_mode == "PRODUCTION", "baseline": normalized_mode == "PRODUCTION",
-            "invariance": normalized_mode == "PRODUCTION", "double_oos": normalized_mode == "PRODUCTION",
+            "causality": normalized_mode == "PRODUCTION",
+            "gold_set": normalized_mode == "PRODUCTION",
+            "embedding_probe": normalized_mode == "PRODUCTION",
+            "baseline": normalized_mode == "PRODUCTION",
+            "invariance": normalized_mode == "PRODUCTION",
+            "double_oos": normalized_mode == "PRODUCTION",
         },
         "dataset": {
-            "dataset_id": dataset_manifest.get("dataset_id"), "snapshot_id": dataset_manifest.get("source_market_snapshot_id"),
-            "feature_schema_version": dataset_manifest.get("feature_schema_version"), "label_schema_version": dataset_manifest.get("label_schema_version"),
+            "dataset_id": dataset_manifest.get("dataset_id"),
+            "snapshot_id": dataset_manifest.get("source_market_snapshot_id"),
+            "feature_schema_version": dataset_manifest.get("feature_schema_version"),
+            "label_schema_version": dataset_manifest.get("label_schema_version"),
             "split_overlap": dataset_manifest.get("split_overlap"),
         },
         "checkpoint": checkpoint_identity,
@@ -110,7 +148,10 @@ def build_reliability_report(
     }
     # Keep the first-round aliases readable for downstream consumers.
     report["leakage_audit"] = report["data_integrity"]["leakage"]
-    report["data"] = {"future_leakage_violations": report["data_integrity"]["causality"].get("total_violations"), "split_overlap": dataset_manifest.get("split_overlap")}
+    report["data"] = {
+        "future_leakage_violations": report["data_integrity"]["causality"].get("total_violations"),
+        "split_overlap": dataset_manifest.get("split_overlap"),
+    }
     report["reliability_gate"] = evaluate_reliability_gate(report, gates)
     validate_reliability_report(report)
     return report
@@ -119,14 +160,22 @@ def build_reliability_report(
 def render_reliability_markdown(report: dict[str, Any]) -> str:
     gate = report.get("reliability_gate", {})
     lines = [
-        "# Technical Transformer V1 Reliability Report", "",
-        f"- Mode: **{report.get('mode', 'UNKNOWN')}**", f"- Gate: **{gate.get('status', 'NOT_EVALUATED')}**",
+        "# Technical Transformer V1 Reliability Report",
+        "",
+        f"- Mode: **{report.get('mode', 'UNKNOWN')}**",
+        f"- Gate: **{gate.get('status', 'NOT_EVALUATED')}**",
         f"- Dataset: `{report.get('dataset', {}).get('dataset_id', 'unknown')}`",
-        f"- Checkpoint: `{report.get('checkpoint', {}).get('checkpoint_id', 'unknown')}`", "",
-        "## Checks", "", "| Check | Status | Actual | Threshold |", "|---|---:|---:|---:|",
+        f"- Checkpoint: `{report.get('checkpoint', {}).get('checkpoint_id', 'unknown')}`",
+        "",
+        "## Checks",
+        "",
+        "| Check | Status | Actual | Threshold |",
+        "|---|---:|---:|---:|",
     ]
     for name, item in gate.get("checks", {}).items():
-        lines.append(f"| `{name}` | {'PASS' if item.get('passed') else 'FAIL'} | {item.get('actual')} | {item.get('threshold')} |")
+        lines.append(
+            f"| `{name}` | {'PASS' if item.get('passed') else 'FAIL'} | {item.get('actual')} | {item.get('threshold')} |"
+        )
     lines.extend(["", "## Split Summary", ""])
     for name, value in report.get("splits", {}).items():
         lines.append(f"- `{name}`: {value.get('sample_count', 0)} samples")

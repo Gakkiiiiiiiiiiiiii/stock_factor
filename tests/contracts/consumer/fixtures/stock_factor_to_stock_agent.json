@@ -1,0 +1,18 @@
+{
+  "producer": "stock_factor",
+  "consumer": "stock_agent",
+  "request": {"factor_set": "production"},
+  "response": {
+    "contract_version": "factor.v1",
+    "factor_id": "factor-fixture",
+    "formula": ["close", "log"],
+    "status": "PROMOTED",
+    "metrics": {
+      "gross_metrics": {"rank_ic": 0.12},
+      "net_metrics": {"rank_ic": 0.1},
+      "tradability_assessment": {"gate_result": "PASS"},
+      "tradability_assessment_hash": "tradability-0123456789abcdef0123456789abcdef",
+      "capacity_artifact_id": null
+    }
+  }
+}

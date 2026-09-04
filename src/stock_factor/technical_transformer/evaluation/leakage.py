@@ -32,21 +32,32 @@ def audit_shortcut_leakage(
     """Audit every feature/target pair for direct or affine shortcuts."""
     x = np.asarray(features, dtype=float)
     y = np.asarray(targets, dtype=float)
-    if x.ndim != 2 or y.ndim != 2 or x.shape[1] != len(feature_names) or y.shape[1] != len(target_names) or x.shape[0] != y.shape[0]:
+    if (
+        x.ndim != 2
+        or y.ndim != 2
+        or x.shape[1] != len(feature_names)
+        or y.shape[1] != len(target_names)
+        or x.shape[0] != y.shape[0]
+    ):
         raise ValueError("features/targets and names have incompatible shapes")
     pairs = []
     violations = []
     for feature_index, feature_name in enumerate(feature_names):
         for target_index, target_name in enumerate(target_names):
-            feature = x[:, feature_index]; target = y[:, target_index]
+            feature = x[:, feature_index]
+            target = y[:, target_index]
             mask = np.isfinite(feature) & np.isfinite(target)
             equality = float(np.mean(feature[mask] == target[mask])) if mask.any() else 0.0
             r2, slope, intercept = _affine_r2(feature, target)
             item = {
-                "feature": str(feature_name), "target": str(target_name),
-                "pearson": pearson(feature, target), "spearman": spearman(feature, target),
-                "exact_equality_rate": equality, "affine_fit_r2": r2,
-                "affine_slope": slope, "affine_intercept": intercept,
+                "feature": str(feature_name),
+                "target": str(target_name),
+                "pearson": pearson(feature, target),
+                "spearman": spearman(feature, target),
+                "exact_equality_rate": equality,
+                "affine_fit_r2": r2,
+                "affine_slope": slope,
+                "affine_intercept": intercept,
             }
             pairs.append(item)
             if abs(item["pearson"]) > pearson_threshold and item["affine_fit_r2"] > r2_threshold:

@@ -1,0 +1,22 @@
+{
+  "candidate_order": [
+    "37e1246c96e2a8f20018c17a1539c201f97d5794e877f877e6f5e5579c241944",
+    "7e39b5aa2f8ea86080182f8bf7073962835a13eeb2365bc131ad56522f8b5174",
+    "9c89b3e52b4398b6e08a421b51e2b19fabbdd03bbcdae87ba295190e10d6e9e3"
+  ],
+  "multiple_testing_universe": [
+    "37e1246c96e2a8f20018c17a1539c201f97d5794e877f877e6f5e5579c241944",
+    "7e39b5aa2f8ea86080182f8bf7073962835a13eeb2365bc131ad56522f8b5174",
+    "9c89b3e52b4398b6e08a421b51e2b19fabbdd03bbcdae87ba295190e10d6e9e3"
+  ],
+  "statistics_hash": "d0ce1d4964c38601fd374107f429fbfc3c13f5c89a08f0d4e569cb4126859cf0",
+  "oos": {
+    "run_id": "run-fixture",
+    "cohort_artifact_hash": "16accdf4ccc09faa5795285f06e167024b4b8c61ed48f7deb0a9b82ef4d6ec9c"
+  },
+  "oos_execution": {
+    "run_id": "run-golden",
+    "cohort_artifact_hash": "efad02d75267983f8f34ecfd8012ac9df494eec8b3681e03f824a787dbd5b06b"
+  },
+  "research_artifact_id": "38653232aeb9ff25c76848b75e107d13ccaed59afd83074f00997583492c5164"
+}

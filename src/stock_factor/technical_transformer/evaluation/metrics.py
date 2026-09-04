@@ -56,8 +56,10 @@ def sign_accuracy(a: np.ndarray, b: np.ndarray) -> float:
 
 def regression_metrics(prediction: np.ndarray, target: np.ndarray) -> dict[str, float]:
     return {
-        "mae": mae(prediction, target), "rmse": rmse(prediction, target),
-        "pearson": pearson(prediction, target), "spearman": spearman(prediction, target),
+        "mae": mae(prediction, target),
+        "rmse": rmse(prediction, target),
+        "pearson": pearson(prediction, target),
+        "spearman": spearman(prediction, target),
         "sign_accuracy": sign_accuracy(prediction, target),
     }
 
@@ -117,12 +119,16 @@ def event_metrics(target: np.ndarray, probability: np.ndarray) -> dict[str, floa
     area = pr_auc(y, p)
     relative_pr = min(area / max(prevalence, 1e-4), 10.0) / 10.0
     result = {
-        "pr_auc": area, "prevalence": prevalence,
+        "pr_auc": area,
+        "prevalence": prevalence,
         "pr_auc_multiple_of_prevalence": area / max(prevalence, 1e-12),
-        "relative_pr": relative_pr, "ece": ece(y, p),
+        "relative_pr": relative_pr,
+        "ece": ece(y, p),
     }
     result.update(precision_recall_f1(y, p))
-    result.update({"precision_at_top1pct": precision_at_top(y, p, 0.01), "precision_at_top5pct": precision_at_top(y, p, 0.05)})
+    result.update(
+        {"precision_at_top1pct": precision_at_top(y, p, 0.01), "precision_at_top5pct": precision_at_top(y, p, 0.05)}
+    )
     return result
 
 
@@ -138,7 +144,12 @@ def soft_phase_metrics(target: np.ndarray, logits_or_probability: np.ndarray) ->
     ce = float(np.mean(-np.sum(y * np.log(np.maximum(p, 1e-12)), axis=1)))
     kl = float(np.mean(np.sum(y * np.log(np.maximum(y, 1e-12) / np.maximum(p, 1e-12)), axis=1)))
     midpoint = 0.5 * (y + p)
-    js = float(np.mean(0.5 * np.sum(y * np.log(np.maximum(y, 1e-12) / np.maximum(midpoint, 1e-12)), axis=1) + 0.5 * np.sum(p * np.log(np.maximum(p, 1e-12) / np.maximum(midpoint, 1e-12)), axis=1)))
+    js = float(
+        np.mean(
+            0.5 * np.sum(y * np.log(np.maximum(y, 1e-12) / np.maximum(midpoint, 1e-12)), axis=1)
+            + 0.5 * np.sum(p * np.log(np.maximum(p, 1e-12) / np.maximum(midpoint, 1e-12)), axis=1)
+        )
+    )
     actual = np.argmax(y, axis=1)
     predicted = np.argmax(p, axis=1)
     classes = range(y.shape[1])
@@ -155,4 +166,12 @@ def soft_phase_metrics(target: np.ndarray, logits_or_probability: np.ndarray) ->
         f1s.append(2 * pr * rc / max(pr + rc, 1e-12))
     confidence = p.max(axis=1)
     correctness = (actual == predicted).astype(float)
-    return {"soft_ce": ce, "kl_divergence": kl, "js_divergence": js, "brier_score": float(np.mean(np.sum((p - y) ** 2, axis=1))), "ece": ece(correctness, confidence), "macro_f1": float(np.mean(f1s)), "confusion_matrix": confusion.tolist()}
+    return {
+        "soft_ce": ce,
+        "kl_divergence": kl,
+        "js_divergence": js,
+        "brier_score": float(np.mean(np.sum((p - y) ** 2, axis=1))),
+        "ece": ece(correctness, confidence),
+        "macro_f1": float(np.mean(f1s)),
+        "confusion_matrix": confusion.tolist(),
+    }

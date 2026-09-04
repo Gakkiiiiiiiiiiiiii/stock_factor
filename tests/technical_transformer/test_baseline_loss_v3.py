@@ -16,4 +16,3 @@ def test_baseline_loss_phase_slice_supports_backward() -> None:
     assert torch.isfinite(loss)
     loss.backward()
     assert prediction.grad is not None and torch.isfinite(prediction.grad).all()
-

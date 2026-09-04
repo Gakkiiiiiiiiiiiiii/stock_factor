@@ -3,6 +3,7 @@
 进入 Final OOS 前必须冻结候选：冻结后不可修改 Formula、不可重新搜索参数、
 不可根据 OOS 结果重新 Mutation。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -25,7 +26,9 @@ class MarketSnapshotRef:
     final_oos_snapshot_id: str
 
 
-def derive_snapshot_refs(data_snapshot_id: str, discovery_range: tuple[int, int], final_oos_range: tuple[int, int]) -> MarketSnapshotRef:
+def derive_snapshot_refs(
+    data_snapshot_id: str, discovery_range: tuple[int, int], final_oos_range: tuple[int, int]
+) -> MarketSnapshotRef:
     def _suffix(label: str, window: tuple[int, int]) -> str:
         material = f"{data_snapshot_id}:{label}:{window[0]}:{window[1]}"
         return hashlib.sha256(material.encode()).hexdigest()[:16]

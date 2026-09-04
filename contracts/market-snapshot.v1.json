@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "market-snapshot.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "data"],
+  "properties": {
+    "contract_version": {"const": "market-snapshot.v1"},
+    "data": {
+      "type": "object",
+      "required": ["symbols", "dates", "bars", "data_version", "data_snapshot_id", "market_snapshot_ref"],
+      "properties": {
+        "symbols": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "dates": {"type": "array", "items": {"type": "string", "format": "date"}},
+        "bars": {"type": "object"},
+        "data_version": {"type": "string", "minLength": 1},
+        "data_snapshot_id": {"type": "string", "minLength": 1},
+        "market_snapshot_ref": {
+          "type": "object",
+          "required": ["market_snapshot_id", "manifest_hash", "calendar_version", "universe_version", "corporate_action_version", "tradability_version", "available_from", "start", "end", "quality_seal", "contract", "ref_hash"],
+          "properties": {
+            "market_snapshot_id": {"type": "string", "minLength": 1},
+            "manifest_hash": {"type": "string", "minLength": 1},
+            "calendar_version": {"type": "string", "minLength": 1},
+            "universe_version": {"type": "string", "minLength": 1},
+            "corporate_action_version": {"type": "string", "minLength": 1},
+            "tradability_version": {"type": "string", "minLength": 1},
+            "available_from": {"type": "string", "format": "date-time"},
+            "start": {"type": "string", "format": "date"},
+            "end": {"type": "string", "format": "date"},
+            "quality_seal": {"const": "PASS"},
+            "contract": {"const": "market-snapshot.v1"},
+            "ref_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        }
+      }
+    }
+  }
+}

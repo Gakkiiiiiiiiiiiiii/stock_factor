@@ -1,0 +1,33 @@
+name: consumer-contracts
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install -e ".[test-core]"
+      - name: Verify formal contract inventory and checksums
+        run: python scripts/contracts/verify_manifest.py
+      - name: Detect breaking schema changes against the merge base
+        env:
+          CONTRACT_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD^' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin "${{ github.base_ref }}" --depth=1
+          fi
+          python scripts/contracts/diff_schema.py --base-ref "$CONTRACT_BASE_REF" --repo-root .
+      - name: Run local consumer-driven contract fixtures
+        run: python -m pytest -q tests/contracts/consumer

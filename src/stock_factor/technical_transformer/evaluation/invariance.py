@@ -45,7 +45,9 @@ def model_embedding_invariance(model: torch.nn.Module, original: torch.Tensor, t
     return cosine_similarity(first, second)
 
 
-def price_scale_invariance(model: torch.nn.Module, original: torch.Tensor, scaled: torch.Tensor, *, minimum: float = 0.98) -> dict[str, float | bool]:
+def price_scale_invariance(
+    model: torch.nn.Module, original: torch.Tensor, scaled: torch.Tensor, *, minimum: float = 0.98
+) -> dict[str, float | bool]:
     cosine = model_embedding_invariance(model, original, scaled)
     return {"cosine": cosine, "minimum": minimum, "passed": cosine >= minimum}
 
@@ -79,7 +81,13 @@ def small_noise_stability(
 ) -> dict[str, float | bool]:
     cosine = model_embedding_invariance(model, original, noisy)
     delta = model_event_probability_delta(model, original, noisy)
-    return {"cosine": cosine, "event_probability_delta": delta, "cosine_minimum": cosine_minimum, "event_probability_delta_maximum": event_probability_delta_maximum, "passed": cosine >= cosine_minimum and delta < event_probability_delta_maximum}
+    return {
+        "cosine": cosine,
+        "event_probability_delta": delta,
+        "cosine_minimum": cosine_minimum,
+        "event_probability_delta_maximum": event_probability_delta_maximum,
+        "passed": cosine >= cosine_minimum and delta < event_probability_delta_maximum,
+    }
 
 
 def _outputs_equal(first: object, second: object) -> bool:
@@ -101,7 +109,9 @@ def future_invariance(
 ) -> dict[str, bool | float]:
     """Change only future rows and verify every T-prefix artifact is stable."""
     changed = frame.copy()
-    columns = [column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed]
+    columns = [
+        column for column in ("open", "high", "low", "close", "volume", "amount", "turnover") if column in changed
+    ]
     changed.loc[cutoff:, columns] = changed.loc[cutoff:, columns].astype(float) * 1000.0
     original_features = feature_builder(frame).iloc[:cutoff].to_numpy()
     changed_features = feature_builder(changed).iloc[:cutoff].to_numpy()
@@ -112,7 +122,9 @@ def future_invariance(
         "label_unchanged": bool(np.allclose(original_labels, changed_labels, equal_nan=True)),
     }
     if window_builder is not None:
-        result["window_unchanged"] = window_builder(frame.iloc[:cutoff]).__repr__() == window_builder(changed.iloc[:cutoff]).__repr__()
+        result["window_unchanged"] = (
+            window_builder(frame.iloc[:cutoff]).__repr__() == window_builder(changed.iloc[:cutoff]).__repr__()
+        )
     if model is not None and window_builder is not None:
         first = window_builder(frame.iloc[:cutoff])
         second = window_builder(changed.iloc[:cutoff])

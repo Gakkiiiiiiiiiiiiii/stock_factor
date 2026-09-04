@@ -5,7 +5,10 @@ from stock_factor.api.main import create_app
 from tests.test_integration import FixtureContent, FixtureMarket
 
 
-def test_mining_and_paper_contracts(tmp_path):
+def test_mining_and_paper_contracts(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTOR_RUNTIME_PROFILE", "test")
+    monkeypatch.setenv("FACTOR_PAPER_AUTHORITY", "quant")
+    monkeypatch.delenv("ALLOW_LOCAL_PAPER", raising=False)
     application = build_application(f"sqlite:///{tmp_path / 'api.db'}", FixtureMarket(), FixtureContent())
     client = TestClient(create_app(application))
     response = client.post("/api/v1/mining/jobs", json={"symbols": ["600000"]})
@@ -21,11 +24,15 @@ def test_mining_and_paper_contracts(tmp_path):
             "top_k": 1,
         },
     )
-    assert orders.json()["data"]["orders"][0]["status"] == "FROZEN"
-    assert client.get("/api/v1/paper/state").json()["contract_version"] == "factor.v1"
+    assert orders.status_code == 503
+    assert orders.json()["detail"]["code"] == "QUANT_UNAVAILABLE"
+    assert client.get("/api/v1/paper/state").status_code == 503
 
 
-def test_legacy_agent_empty_symbol_request_uses_service_defaults(tmp_path):
+def test_legacy_agent_empty_symbol_request_uses_service_defaults(tmp_path, monkeypatch):
+    monkeypatch.setenv("FACTOR_RUNTIME_PROFILE", "test")
+    monkeypatch.setenv("FACTOR_PAPER_AUTHORITY", "quant")
+    monkeypatch.delenv("ALLOW_LOCAL_PAPER", raising=False)
     application = build_application(f"sqlite:///{tmp_path / 'compat.db'}", FixtureMarket(), FixtureContent())
     client = TestClient(create_app(application))
     response = client.post("/api/v1/mining/jobs", json={"rounds": 10, "candidates_per_round": 5})

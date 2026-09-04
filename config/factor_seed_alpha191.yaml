@@ -1,3 +1,8 @@
+schema_version: config-artifact.v1
+config_id: factor_seed_alpha191
+checksum: sha256:45ab8e77dfd02e02d46d212fed73061766d7a52fb88e2fb3849f2a3a79237bfa
+environment: shared
+
 # Alpha191-style, DSL-safe seeds.  These are intentionally maintained as
 # data: mining can use them for few-shot prompting, mutation baselines and
 # duplicate detection without hard-coding a small accidental sample in Python.

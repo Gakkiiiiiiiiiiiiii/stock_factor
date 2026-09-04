@@ -1,4 +1,5 @@
 """FactorSet 版本化（详细修改方案 §11 / §17）。"""
+
 from __future__ import annotations
 
 import pytest

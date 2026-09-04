@@ -3,6 +3,7 @@
 Factor 层 Sharpe 基于 research proxy（P0-1），但 DSR/PSR 对自动挖因子的
 selection-bias 控制不可或缺。
 """
+
 from __future__ import annotations
 
 from math import erf, sqrt
@@ -59,7 +60,9 @@ def sharpe_validation(
     annualized = observed * sqrt(periods_per_year)
     benchmark_per_period = benchmark_sharpe / sqrt(periods_per_year)
     psr = probabilistic_sharpe_ratio(observed, benchmark_per_period, sample_length, skewness, kurtosis)
-    dsr = deflated_sharpe_ratio(observed, sample_length, trials=max(1, number_of_trials), skewness=skewness, kurtosis=kurtosis)
+    dsr = deflated_sharpe_ratio(
+        observed, sample_length, trials=max(1, number_of_trials), skewness=skewness, kurtosis=kurtosis
+    )
     return {
         "observed_sharpe": round(observed, 8),
         "annualized_sharpe": round(float(annualized), 8),

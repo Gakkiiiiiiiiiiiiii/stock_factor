@@ -7,7 +7,12 @@ import pytest
 
 pd = pytest.importorskip("pandas")
 
-from stock_factor.technical_transformer.data.dataset import DatasetConfig, RobustFeatureProcessor, SplitConfig, _eligible_samples  # noqa: E402
+from stock_factor.technical_transformer.data.dataset import (  # noqa: E402
+    DatasetConfig,
+    RobustFeatureProcessor,
+    SplitConfig,
+    _eligible_samples,
+)  # noqa: E402
 from stock_factor.technical_transformer.data.features import build_features  # noqa: E402
 from stock_factor.technical_transformer.data.labels import build_labels  # noqa: E402
 from stock_factor.technical_transformer.data.schemas import ALL_LABELS, CONTINUOUS_FEATURES, FEATURE_NAMES, LABEL_SCHEMA  # noqa: E402
@@ -16,14 +21,27 @@ from stock_factor.technical_transformer.data.schemas import ALL_LABELS, CONTINUO
 def _bars(rows: int = 320) -> pd.DataFrame:
     dates = pd.date_range("2023-01-03", periods=rows, freq="B")
     close = 10 + np.cumsum(np.sin(np.arange(rows) / 9) * 0.05 + 0.02)
-    return pd.DataFrame({
-        "trading_date": dates, "symbol": "AAA.SZ", "open": close - 0.03, "high": close + 0.08,
-        "low": close - 0.08, "close": close, "volume": 100000 + np.arange(rows) * 10,
-        "amount": (100000 + np.arange(rows) * 10) * close, "turnover": 0.01 + np.arange(rows) * 0.000001,
-        "is_suspended": 0.0, "is_st": 0.0, "is_star_st": 0.0, "is_delisting": 0.0,
-        "is_limit_up": 0.0, "is_limit_down": 0.0, "state_observed": 1.0,
-        "listing_days": np.arange(1, rows + 1),
-    })
+    return pd.DataFrame(
+        {
+            "trading_date": dates,
+            "symbol": "AAA.SZ",
+            "open": close - 0.03,
+            "high": close + 0.08,
+            "low": close - 0.08,
+            "close": close,
+            "volume": 100000 + np.arange(rows) * 10,
+            "amount": (100000 + np.arange(rows) * 10) * close,
+            "turnover": 0.01 + np.arange(rows) * 0.000001,
+            "is_suspended": 0.0,
+            "is_st": 0.0,
+            "is_star_st": 0.0,
+            "is_delisting": 0.0,
+            "is_limit_up": 0.0,
+            "is_limit_down": 0.0,
+            "state_observed": 1.0,
+            "listing_days": np.arange(1, rows + 1),
+        }
+    )
 
 
 def test_feature_and_label_schemas_are_versioned_and_unique() -> None:
@@ -49,9 +67,12 @@ def test_labels_do_not_read_future_rows() -> None:
 def test_split_window_does_not_cross_segment_start() -> None:
     bars = _bars()
     split = SplitConfig(
-        train_start="2023-01-03", train_end="2023-12-29",
-        valid_start="2024-03-01", valid_end="2024-09-30",
-        test_start="2024-12-02", test_end="2024-12-31",
+        train_start="2023-01-03",
+        train_end="2023-12-29",
+        valid_start="2024-03-01",
+        valid_end="2024-09-30",
+        test_start="2024-12-02",
+        test_end="2024-12-31",
     )
     config = DatasetConfig(split=split, min_listing_days=1, min_quality_ratio=0.0)
     samples = _eligible_samples(bars["trading_date"], bars["listing_days"], np.ones(len(bars)), config)
@@ -66,7 +87,10 @@ def test_split_window_does_not_cross_segment_start() -> None:
 def test_processor_fit_scope_is_explicit() -> None:
     processor = RobustFeatureProcessor().fit(np.ones((20, len(CONTINUOUS_FEATURES)), dtype=np.float32))
     assert processor.as_dict()["fit_scope"] == "train"
-    assert processor.transform(np.zeros((2, len(CONTINUOUS_FEATURES)), dtype=np.float32)).shape == (2, len(CONTINUOUS_FEATURES))
+    assert processor.transform(np.zeros((2, len(CONTINUOUS_FEATURES)), dtype=np.float32)).shape == (
+        2,
+        len(CONTINUOUS_FEATURES),
+    )
 
 
 def test_features_keep_suspension_quality_mask() -> None:

@@ -3,14 +3,19 @@ from __future__ import annotations
 import hashlib
 import math
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 
 import numpy as np
 
-from stock_factor.application.mining import FactorMiningService
+from stock_factor.application.market_snapshot_validator import validate_formal_market_snapshot
+from stock_factor.application.mining.service import FactorMiningService
 from stock_factor.application.panel import build_feature_panel
-from stock_factor.application.paper import PaperTradingService
+from stock_factor.application.readiness import ReadinessService
+from stock_factor.config.runtime import RuntimeConfig
+from stock_factor.domain.content_signal_v5 import FormalContentQuery, FormalContentRef
 from stock_factor.domain.factor import FactorJob
+from stock_factor.domain.market_dataset_ref import FormalMarketDatasetRef
 from stock_factor.engine.alpha import compose_alpha_scores_with_evidence
 from stock_factor.engine.fitness import evaluate_factor
 from stock_factor.engine.vm import StackVM
@@ -44,18 +49,119 @@ class FactorApplication:
         mining: FactorMiningService,
         market: MarketDataProvider,
         content: ContentSignalProvider,
-        paper: PaperTradingService,
+        paper: Any,
+        runtime_config: RuntimeConfig | None = None,
+        research_artifact_service=None,
+        readiness_service: ReadinessService | None = None,
     ) -> None:
         self._jobs, self._factors, self._mining = jobs, factors, mining
         self._market, self._content, self._paper = market, content, paper
+        self._runtime_config = runtime_config or RuntimeConfig.from_env()
+        self.research_artifact_service = research_artifact_service
+        self._readiness = readiness_service or ReadinessService(self._runtime_config)
+
+    @property
+    def runtime_config(self) -> RuntimeConfig:
+        """The validated immutable configuration used to compose this app."""
+        return self._runtime_config
+
+    @property
+    def readiness_service(self) -> ReadinessService:
+        return self._readiness
 
     def create_mining_job(self, payload: dict, idempotency_key: str | None = None) -> dict:
+        # Do not leak the generated job/experiment identity into the caller's
+        # mutable request object; a second submission is a distinct job unless
+        # the repository deduplicates it by idempotency key.
+        payload = dict(payload)
+        research_mode = str(payload.get("research_mode", "EXPLORATORY")).upper()
+        if research_mode not in {"FORMAL", "EXPLORATORY"}:
+            raise ValueError("research_mode must be FORMAL or EXPLORATORY")
+        # Admission is deliberately before any market/content access.  A
+        # failed formal admission therefore cannot create a job or trigger a
+        # provider request.
+        readiness = (
+            self._readiness.admit_formal_mining(payload)
+            if research_mode == "FORMAL"
+            else self._readiness.research(model_requested=bool(payload.get("use_model")))
+        )
+        payload["readiness_evidence"] = readiness.to_dict()
+        payload["readiness_evidence_hash"] = readiness.evidence_hash
+        payload["readiness_frozen_at"] = readiness.frozen_at
+        payload["readiness_threshold_version"] = readiness.threshold_version
+        formal_ref = None
+        formal_content_query = None
+        formal_content_ref = None
+        if research_mode == "FORMAL":
+            ref_payload = payload.get("formal_market_ref")
+            if not isinstance(ref_payload, dict):
+                raise ValueError("FORMAL research requires a complete formal_market_ref")
+            ref = FormalMarketDatasetRef.from_payload(ref_payload)
+            formal_ref = ref
+            query_payload = payload.get("formal_content_query")
+            content_payload = payload.get("formal_content_ref")
+            if not isinstance(query_payload, dict) or not isinstance(content_payload, dict):
+                raise ValueError("FORMAL research requires formal_content_query and formal_content_ref")
+            formal_content_query = FormalContentQuery.model_validate(query_payload)
+            formal_content_ref = FormalContentRef.model_validate(content_payload)
+            expected_content_ref = FormalContentRef.from_query(formal_content_query, formal_content_ref.manifest_hash)
+            if formal_content_ref != expected_content_ref:
+                raise ValueError("formal content ref does not match query")
+            requested_start = payload.get("start") or ref.start
+            requested_end = payload.get("end") or ref.end
+            as_of = formal_content_query.availability_as_of
+            validate_formal_market_snapshot(
+                ref,
+                requested_start=requested_start,
+                requested_end=requested_end,
+                as_of=as_of,
+            )
+            payload["formal_market_ref"] = {
+                **ref_payload,
+                "contract": ref.contract,
+                "ref_hash": ref.ref_hash,
+            }
+            payload["formal_content_query"] = formal_content_query.model_dump(mode="json")
+            payload["formal_content_ref"] = formal_content_ref.model_dump(mode="json")
+            payload["formal_eligible"] = True
+        else:
+            payload["research_mode"] = "EXPLORATORY"
+            payload["formal_eligible"] = False
         # §90：Quant 市场数据不可用时禁止启动新 Mining。
         symbols = list(payload.get("symbols") or [])
         if symbols:
-            self._require_market_available(symbols)
-        job = FactorJob(job_id=uuid4().hex, request=payload, idempotency_key=idempotency_key)
-        return self._jobs.create(job).to_dict()
+            if formal_ref is not None:
+                end = payload.get("end") or formal_ref.end
+                start = payload.get("start") or formal_ref.start
+                as_of = formal_content_query.availability_as_of
+                snapshot = self._market.get_daily_bars(
+                    symbols,
+                    start,
+                    end,
+                    "qfq",
+                    formal_market_ref=formal_ref,
+                    as_of=as_of,
+                )
+                if snapshot.formal_market_ref is None or snapshot.formal_market_ref.ref_hash != formal_ref.ref_hash:
+                    raise ValueError("formal market provider returned a different market snapshot ref")
+                self._content.load_signals(
+                    symbols,
+                    start,
+                    end,
+                    query=formal_content_query,
+                    expected_ref=formal_content_ref,
+                )
+            else:
+                self._require_market_available(symbols)
+        job_id = uuid4().hex
+        if not payload.get("experiment_id"):
+            # Job identity, rather than request content, isolates independent
+            # submissions while preserving the id on a retried job record.
+            payload["experiment_id"] = "exp-" + hashlib.sha256(job_id.encode()).hexdigest()[:16]
+        job = FactorJob(job_id=job_id, request=payload, idempotency_key=idempotency_key)
+        result = self._jobs.create(job).to_dict()
+        result["formal_eligible"] = payload["formal_eligible"]
+        return result
 
     def _require_market_available(self, symbols: list[str]) -> None:
         end = datetime.now(UTC).date().isoformat()
@@ -87,7 +193,9 @@ class FactorApplication:
             current = self._jobs.get(job.job_id)
             stage = current.stage if current else stage
             # §90：数据拉取阶段失败 => 显式标记 DATA_NOT_READY。
-            message = f"DATA_NOT_READY: {type(exc).__name__}: {exc}" if stage == "data" else f"{type(exc).__name__}: {exc}"
+            message = (
+                f"DATA_NOT_READY: {type(exc).__name__}: {exc}" if stage == "data" else f"{type(exc).__name__}: {exc}"
+            )
             self._jobs.fail(job.job_id, stage, message)
             return {"job_id": job.job_id, "status": "FAILED", "stage": stage, "error": message}
 
@@ -172,14 +280,18 @@ class FactorApplication:
                         "evidence": evidence,
                     }
                 )
-        factor_set_version = "factor-set-" + hashlib.sha256(
-            "|".join(sorted(str(factor.get("factor_id")) for factor in factors)).encode()
-        ).hexdigest()[:12]
-        factor_set_id = "fs-" + hashlib.sha256(
-            "|".join(
-                sorted(f"{factor.get('factor_id')}:{factor.get('version', 1)}" for factor in factors)
-            ).encode()
-        ).hexdigest()[:16]
+        factor_set_version = (
+            "factor-set-"
+            + hashlib.sha256("|".join(sorted(str(factor.get("factor_id")) for factor in factors)).encode()).hexdigest()[
+                :12
+            ]
+        )
+        factor_set_id = (
+            "fs-"
+            + hashlib.sha256(
+                "|".join(sorted(f"{factor.get('factor_id')}:{factor.get('version', 1)}" for factor in factors)).encode()
+            ).hexdigest()[:16]
+        )
         return {
             "as_of": snapshot.dates[-1] if snapshot.dates else as_of,
             "factor_count": len(contributions),

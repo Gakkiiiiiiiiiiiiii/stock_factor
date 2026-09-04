@@ -5,8 +5,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict
+
+from stock_factor.config.schema import load_config
 
 
 def project_root() -> Path:
@@ -171,10 +172,7 @@ class ResearchConfig(BaseModel):
 @lru_cache(maxsize=1)
 def get_research_config(path: str | Path | None = None) -> ResearchConfig:
     cfg_path = Path(path) if path else project_root() / "config" / "factor_research.yaml"
-    try:
-        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
-    except FileNotFoundError:
-        raw = {}
+    raw = load_config(cfg_path).payload if cfg_path.exists() else {}
     data = _apply_env_overrides(raw)
     config = ResearchConfig.model_validate(data)
     config.validate_runtime()

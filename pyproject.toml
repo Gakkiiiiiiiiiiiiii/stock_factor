@@ -16,7 +16,29 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.2", "pytest-cov>=5.0", "ruff>=0.8"]
+# ``test-core`` deliberately contains no ML runtime.  Keep this profile
+# suitable for deterministic research and contract jobs in a CPU-only image.
+test-core = ["pytest>=8.2", "pytest-cov>=5.0", "ruff>=0.8", "jsonschema>=4.23"]
+# Keep the ML runtime separate so importing/running core code does not require
+# Torch.  The version floor is shared by CPU and GPU profiles; CI selects the
+# CPU wheel for ``ml-cpu`` and deployers select their CUDA index for ``ml-gpu``.
+ml-cpu = ["torch>=2.6"]
+ml-gpu = ["torch>=2.6"]
+# ``test-ml`` is self-contained rather than a self-referential extra.  This
+# makes ``pip install -e '.[test-ml]'`` reliable from a source checkout.
+test-ml = [
+  "pytest>=8.2",
+  "pytest-cov>=5.0",
+  "ruff>=0.8",
+  "jsonschema>=4.23",
+  "pandas>=2.2",
+  "pyarrow>=14",
+  "torch>=2.6",
+  "safetensors>=0.8",
+  "pyqlib==0.9.7",
+]
+# Backward-compatible aliases retained for existing local and deployment jobs.
+test = ["pytest>=8.2", "pytest-cov>=5.0", "ruff>=0.8", "jsonschema>=4.23"]
 postgres = ["psycopg[binary]>=3.2"]
 technical = [
   "pandas>=2.2",
@@ -28,6 +50,7 @@ technical = [
 
 [project.scripts]
 stock-factor-worker = "stock_factor.workers.factor_worker:main"
+stock-factor = "stock_factor.cli:main"
 
 [tool.ruff]
 line-length = 120

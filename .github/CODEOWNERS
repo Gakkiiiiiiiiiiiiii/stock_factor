@@ -1,0 +1,10 @@
+# Default repository owner. Replace with the maintained GitHub team when one is
+# established; this file does not itself enable branch protection.
+* @Gakkiiiiiiiiiiiiii
+
+# Contract, research-integrity, and persistence changes require domain review.
+/contracts/ @Gakkiiiiiiiiiiiiii
+/migrations/ @Gakkiiiiiiiiiiiiii
+/src/stock_factor/engine/ @Gakkiiiiiiiiiiiiii
+/src/stock_factor/technical_transformer/ @Gakkiiiiiiiiiiiiii
+/tests/ @Gakkiiiiiiiiiiiiii

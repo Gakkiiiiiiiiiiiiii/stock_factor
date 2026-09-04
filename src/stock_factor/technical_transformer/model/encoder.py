@@ -35,8 +35,13 @@ class TechnicalTransformer(nn.Module):
         nn.init.normal_(self.position, std=0.02)
         nn.init.normal_(self.cls_token, std=0.02)
         layer = nn.TransformerEncoderLayer(
-            d_model=hidden_size, nhead=heads, dim_feedforward=ffn_size,
-            dropout=dropout, activation="gelu", batch_first=True, norm_first=True,
+            d_model=hidden_size,
+            nhead=heads,
+            dim_feedforward=ffn_size,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
         )
         self.encoder = nn.TransformerEncoder(layer, num_layers=layers, enable_nested_tensor=False)
         self.final_norm = nn.LayerNorm(hidden_size)
@@ -84,6 +89,8 @@ class TechnicalTransformer(nn.Module):
         hidden = self.final_norm(hidden)
         cls_hidden = hidden[:, 0]
         return {
-            "token_hidden": hidden[:, 1:], "cls_hidden": cls_hidden,
-            "technical_embedding": self.embedding_projection(cls_hidden), "mask_prediction": self.mask_head(hidden[:, 1:]),
+            "token_hidden": hidden[:, 1:],
+            "cls_hidden": cls_hidden,
+            "technical_embedding": self.embedding_projection(cls_hidden),
+            "mask_prediction": self.mask_head(hidden[:, 1:]),
         }

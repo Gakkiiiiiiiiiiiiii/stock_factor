@@ -1,0 +1,29 @@
+{
+  "producer": "stock_content",
+  "consumer": "stock_factor",
+  "request": {
+    "contract": "content-factor-signal.v5.1",
+    "content_snapshot_id": "content-snapshot-2026-08-10",
+    "knowledge_as_of": "2026-08-10T00:00:00Z",
+    "availability_as_of": "2026-08-10T00:00:00Z",
+    "pit_mode": "PUBLIC_STRICT"
+  },
+  "response": {
+    "contract_version": "content-factor-signal.v5.1",
+    "data": {
+      "contract": "content-factor-signal.v5.1",
+      "checksum": "sha256:fixture-content",
+      "content_snapshot_id": "content-snapshot-2026-08-10",
+      "business_as_of": "2026-08-10T00:00:00Z",
+      "knowledge_as_of": "2026-08-10T00:00:00Z",
+      "availability_as_of": "2026-08-10T00:00:00Z",
+      "pit_mode": "PUBLIC_STRICT",
+      "signal_policy_version": "policy-v1",
+      "min_support": 2,
+      "producer_commit": "stock_content@fixture",
+      "allow_proxy": false,
+      "manifest_hash": "manifest-fixture",
+      "items": []
+    }
+  }
+}

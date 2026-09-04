@@ -45,8 +45,14 @@ def build_embedding_split(
     dimension = int(getattr(model, "encoder", model).embedding_dim) if embeddings == [] else embeddings[0].shape[0]
     return EmbeddingSplit(
         embeddings=np.asarray(embeddings, dtype=np.float32).reshape((-1, dimension)),
-        targets=np.asarray(targets, dtype=np.float32).reshape((-1, len(targets[0]))) if targets else np.empty((0, 0), dtype=np.float32),
-        label_valid=np.asarray(valid, dtype=np.uint8).reshape((-1, len(valid[0]))) if valid else np.empty((0, 0), dtype=np.uint8),
-        raw_features=np.asarray(raw, dtype=np.float32).reshape((-1, raw[0].shape[-1])) if raw else np.empty((0, 0), dtype=np.float32),
+        targets=np.asarray(targets, dtype=np.float32).reshape((-1, len(targets[0])))
+        if targets
+        else np.empty((0, 0), dtype=np.float32),
+        label_valid=np.asarray(valid, dtype=np.uint8).reshape((-1, len(valid[0])))
+        if valid
+        else np.empty((0, 0), dtype=np.uint8),
+        raw_features=np.asarray(raw, dtype=np.float32).reshape((-1, raw[0].shape[-1]))
+        if raw
+        else np.empty((0, 0), dtype=np.float32),
         metadata=tuple(metadata),
     )

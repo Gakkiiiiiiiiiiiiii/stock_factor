@@ -3,6 +3,7 @@
 每次 Mining Experiment 必须记录 hypothesis_count / candidate_count / tested_factor_count，
 禁止只保存获胜因子的 p-value。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -85,7 +86,9 @@ class TrialRegistry:
 
 
 def correct_multiple_testing(
-    registry: TrialRegistry, alpha: float = 0.05, methods: tuple[str, ...] = ("bonferroni", "holm", "benjamini_hochberg")
+    registry: TrialRegistry,
+    alpha: float = 0.05,
+    methods: tuple[str, ...] = ("bonferroni", "holm", "benjamini_hochberg"),
 ) -> dict:
     """对试验族内全部 p-value 做校正；只保存获胜因子 p-value 的做法被结构性禁止。"""
     if not registry.p_values:

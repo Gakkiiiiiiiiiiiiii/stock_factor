@@ -1,0 +1,85 @@
+schema_version: config-artifact.v1
+config_id: technical_v1_reliability_v3
+checksum: sha256:039884e411ee384b980ab2b0663b476b3071b5d9bc6dd89528ed3f5226313a2a
+environment: shared
+
+project:
+  name: technical-transformer-v1-reliability-v3
+
+training:
+  selection_policy_version: technical-selection.v1
+  seed: 42
+  batch_size: 32
+  gradient_accumulation: 2
+  run_stages: [masked_pretraining, ma_bollinger, wyckoff_primitives, wyckoff_phase_events]
+
+baseline:
+  models: [gru, last_day_mlp]
+  max_epochs: 10
+  patience: 3
+  use_event_pos_weight: true
+  selection:
+    metric: technical_composite
+
+gold:
+  role: RESEARCH
+  allowed_splits: [double_oos]
+  kappa_min: 0.60
+  min_positive_per_event: 30
+  min_negative_per_event: 50
+
+invariance:
+  require_raw_snapshot: true
+  price_scale:
+    multiplier: 10.0
+    embedding_cosine_min: 0.98
+  raw_noise:
+    sigma: 0.0005
+    embedding_cosine_min: 0.95
+    phase_js_max: 0.10
+    event_median_delta_max: 0.10
+
+stages:
+  - name: masked_pretraining
+    epochs: 6
+    encoder_lr: 0.0003
+    head_lr: 0.0003
+    selection: mask_loss
+    mask_mode: mixed
+    patience: 3
+    max_steps_per_epoch: null
+  - name: ma_bollinger
+    epochs: 10
+    encoder_lr: 0.0001
+    head_lr: 0.0001
+    selection: ma_boll_composite
+    active_heads: [ma, bollinger]
+    patience: 3
+    max_steps_per_epoch: null
+  - name: wyckoff_primitives
+    epochs: 10
+    encoder_lr: 0.00005
+    head_lr: 0.0001
+    selection: primitive_composite
+    active_heads: [ma, bollinger, wyckoff_primitives]
+    patience: 3
+    max_steps_per_epoch: null
+  - name: wyckoff_phase_events
+    epochs: 10
+    encoder_lr: 0.00002
+    head_lr: 0.0001
+    selection: technical_composite
+    active_heads: [ma, bollinger, wyckoff_primitives, phase, events]
+    patience: 3
+    max_steps_per_epoch: null
+
+reliability:
+  mode: PRODUCTION
+  gate_config: config/technical_reliability_gate_v1.yaml
+  require:
+    causality: true
+    gold_set: true
+    embedding_probe: true
+    baseline: true
+    invariance: true
+    double_oos: true

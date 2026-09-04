@@ -36,7 +36,11 @@ def evaluate_linear_probe(probe: LinearProbe, test_embedding: np.ndarray, test_t
     x = _design(test_embedding)
     y = np.asarray(test_target, dtype=float).reshape(-1)
     prediction = x @ probe.weights
-    return {"pearson": pearson(prediction, y), "spearman": spearman(prediction, y), "mae": float(np.mean(np.abs(prediction - y)))}
+    return {
+        "pearson": pearson(prediction, y),
+        "spearman": spearman(prediction, y),
+        "mae": float(np.mean(np.abs(prediction - y))),
+    }
 
 
 def _class_ids(target: np.ndarray) -> np.ndarray:
@@ -44,7 +48,14 @@ def _class_ids(target: np.ndarray) -> np.ndarray:
     return np.argmax(values, axis=1) if values.ndim == 2 else (values > 0.5).astype(int)
 
 
-def fit_classification_probe(train_embedding: np.ndarray, train_target: np.ndarray, *, steps: int = 200, learning_rate: float = 0.05, seed: int = 42) -> ClassificationProbe:
+def fit_classification_probe(
+    train_embedding: np.ndarray,
+    train_target: np.ndarray,
+    *,
+    steps: int = 200,
+    learning_rate: float = 0.05,
+    seed: int = 42,
+) -> ClassificationProbe:
     x = np.asarray(train_embedding, dtype=float)
     y = _class_ids(np.asarray(train_target))
     classes = max(2, int(np.max(y)) + 1 if len(y) else 2)
@@ -74,10 +85,15 @@ def _macro_f1(actual: np.ndarray, predicted: np.ndarray, classes: int) -> float:
     return float(np.mean(values))
 
 
-def evaluate_classification_probe(probe: ClassificationProbe, test_embedding: np.ndarray, test_target: np.ndarray) -> dict[str, float]:
+def evaluate_classification_probe(
+    probe: ClassificationProbe, test_embedding: np.ndarray, test_target: np.ndarray
+) -> dict[str, float]:
     actual = _class_ids(np.asarray(test_target))
     predicted = np.argmax(np.asarray(test_embedding, dtype=float) @ probe.weights + probe.bias, axis=1)
-    return {"accuracy": float(np.mean(predicted == actual)) if len(actual) else 0.0, "macro_f1": _macro_f1(actual, predicted, probe.classes) if len(actual) else 0.0}
+    return {
+        "accuracy": float(np.mean(predicted == actual)) if len(actual) else 0.0,
+        "macro_f1": _macro_f1(actual, predicted, probe.classes) if len(actual) else 0.0,
+    }
 
 
 def _is_classification(target: np.ndarray) -> bool:
@@ -88,20 +104,28 @@ def _is_classification(target: np.ndarray) -> bool:
     return len(unique) <= 2 and set(unique.tolist()).issubset({0.0, 1.0})
 
 
-def _chronological_split(values: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _chronological_split(
+    values: np.ndarray, target: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     cut = min(max(1, int(len(values) * 0.8)), max(1, len(values) - 1))
     return values[:cut], values[cut:], target[:cut], target[cut:]
 
 
-def linear_regression_probe(embedding: np.ndarray, target: np.ndarray, *, seed: int = 42, ridge: float = 1e-3) -> dict[str, float]:
+def linear_regression_probe(
+    embedding: np.ndarray, target: np.ndarray, *, seed: int = 42, ridge: float = 1e-3
+) -> dict[str, float]:
     """Compatibility helper using a chronological, never-random split."""
     train_x, test_x, train_y, test_y = _chronological_split(np.asarray(embedding), np.asarray(target))
     return evaluate_linear_probe(fit_linear_probe(train_x, train_y, ridge=ridge), test_x, test_y)
 
 
-def classification_probe(embedding: np.ndarray, target: np.ndarray, *, seed: int = 42, steps: int = 200) -> dict[str, float]:
+def classification_probe(
+    embedding: np.ndarray, target: np.ndarray, *, seed: int = 42, steps: int = 200
+) -> dict[str, float]:
     train_x, test_x, train_y, test_y = _chronological_split(np.asarray(embedding), np.asarray(target))
-    return evaluate_classification_probe(fit_classification_probe(train_x, train_y, steps=steps, seed=seed), test_x, test_y)
+    return evaluate_classification_probe(
+        fit_classification_probe(train_x, train_y, steps=steps, seed=seed), test_x, test_y
+    )
 
 
 def run_embedding_probe(
@@ -131,7 +155,11 @@ def run_embedding_probe(
     else:
         train_targets = train_targets or targets
         test_targets = test_targets or targets
-    result: dict[str, Any] = {"frozen": True, "split": {"train": "explicit_or_chronological", "test": "explicit_or_chronological"}, "tasks": {}}
+    result: dict[str, Any] = {
+        "frozen": True,
+        "split": {"train": "explicit_or_chronological", "test": "explicit_or_chronological"},
+        "tasks": {},
+    }
     for name, target in targets.items():
         train_target = np.asarray(train_targets[name])
         test_target = np.asarray(test_targets[name])
@@ -226,10 +254,20 @@ def gold_neighbor_semantic_hit(embeddings: np.ndarray, event_labels: np.ndarray)
     np.fill_diagonal(similarity, -np.inf)
     hits: list[float] = []
     for index in range(len(values)):
+        # A Gold anchor without any compatible peer is not an evaluable
+        # nearest-neighbor query.  Excluding it avoids treating an inherently
+        # untestable singleton event as a semantic miss.
+        if not any(
+            _dense_gold_semantic_match(labels[index], labels[peer]) for peer in range(len(labels)) if peer != index
+        ):
+            continue
         neighbor = int(np.argmax(similarity[index]))
-        positive = np.flatnonzero(labels[index] > 0)
-        if len(positive):
-            hits.append(float(np.any(labels[neighbor, positive] > 0)))
-        else:
-            hits.append(float(np.array_equal(labels[index], labels[neighbor])))
+        hits.append(float(_dense_gold_semantic_match(labels[index], labels[neighbor])))
     return float(np.mean(hits)) if hits else None
+
+
+def _dense_gold_semantic_match(anchor: np.ndarray, candidate: np.ndarray) -> bool:
+    positive = anchor > 0
+    if np.any(positive):
+        return bool(np.any(candidate[positive] > 0))
+    return bool(np.array_equal(anchor, candidate))

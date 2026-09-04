@@ -1,4 +1,5 @@
 """PBO（详细修改方案 P1-3）。"""
+
 from __future__ import annotations
 
 import numpy as np

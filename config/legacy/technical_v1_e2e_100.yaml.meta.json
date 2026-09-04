@@ -1,0 +1,7 @@
+{
+  "schema_version": "config-legacy-alias.v1",
+  "config_id": "technical_v1_e2e_100",
+  "environment": "shared",
+  "formal_eligible": false,
+  "source_sha256": "sha256:5b5ab997a25d205a284efe0e230d69bbaf698338ef85a5560e7e5a12de643579"
+}

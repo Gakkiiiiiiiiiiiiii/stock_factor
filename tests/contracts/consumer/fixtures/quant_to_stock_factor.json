@@ -1,0 +1,33 @@
+{
+  "producer": "quant",
+  "consumer": "stock_factor",
+  "request": {
+    "contract_version": "market-snapshot.v1",
+    "market_snapshot_id": "market-snapshot-2026-08-10",
+    "ref_hash": "ref-fixture"
+  },
+  "response": {
+    "contract_version": "market-snapshot.v1",
+    "data": {
+      "symbols": ["CN.A.600000"],
+      "dates": ["2026-08-10"],
+      "bars": {"CN.A.600000": {"2026-08-10": {"close": 10.0, "volume": 1000}}},
+      "data_version": "quant-bars-v1",
+      "data_snapshot_id": "market-snapshot-2026-08-10",
+      "market_snapshot_ref": {
+        "market_snapshot_id": "market-snapshot-2026-08-10",
+        "manifest_hash": "manifest-fixture",
+        "calendar_version": "cal-v1",
+        "universe_version": "universe-v1",
+        "corporate_action_version": "ca-v1",
+        "tradability_version": "trad-v1",
+        "available_from": "2026-08-10T00:00:00Z",
+        "start": "2026-08-10",
+        "end": "2026-08-10",
+        "quality_seal": "PASS",
+        "contract": "market-snapshot.v1",
+        "ref_hash": "1046f56fae1c74f812097cb137f9b9f913332b5f02c064aea52c890aaef1cd0c"
+      }
+    }
+  }
+}

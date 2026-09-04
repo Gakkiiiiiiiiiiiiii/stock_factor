@@ -18,8 +18,7 @@ class MaskedBatch:
 _GROUP_IDS = {name: index + 1 for index, name in enumerate(FEATURE_GROUPS)}
 _CONTINUOUS_INDICES = tuple(FEATURE_NAMES.index(name) for name in CONTINUOUS_FEATURES)
 _GROUP_INDICES = {
-    name: tuple(FEATURE_NAMES.index(feature) for feature in features)
-    for name, features in FEATURE_GROUPS.items()
+    name: tuple(FEATURE_NAMES.index(feature) for feature in features) for name, features in FEATURE_GROUPS.items()
 }
 
 
@@ -41,7 +40,7 @@ def _one_mask(
     if mode == "day":
         count = min(candidates.numel(), max(1, int(round(candidates.numel() * 0.125))))
         days = candidates[torch.randperm(candidates.numel(), generator=generator)[:count]]
-        positions[batch_index, days[:, None], torch.tensor(_CONTINUOUS_INDICES) ] = True
+        positions[batch_index, days[:, None], torch.tensor(_CONTINUOUS_INDICES)] = True
         groups[batch_index, days[:, None], torch.tensor(_CONTINUOUS_INDICES)] = 0
         return
     if mode == "group":
@@ -56,8 +55,8 @@ def _one_mask(
     if mode == "span":
         length = int(torch.randint(2, 6, (1,), generator=generator))
         start = int(torch.randint(max(1, steps - length + 1), (1,), generator=generator))
-        positions[batch_index, start:start + length, torch.tensor(_CONTINUOUS_INDICES)] = True
-        groups[batch_index, start:start + length, torch.tensor(_CONTINUOUS_INDICES)] = 0
+        positions[batch_index, start : start + length, torch.tensor(_CONTINUOUS_INDICES)] = True
+        groups[batch_index, start : start + length, torch.tensor(_CONTINUOUS_INDICES)] = 0
         return
     raise ValueError(f"unknown mask mode: {mode}")
 

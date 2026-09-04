@@ -3,6 +3,7 @@
 一次因子研究实验的唯一权威记录：Discovery → Finalist → Freeze → OOS，
 状态机保证 Final OOS 只能在 FROZEN 且授权之后执行一次。
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -46,6 +47,11 @@ class ResearchExperiment:
     symbols: list[str]
     discovery_snapshot_id: str | None = None
     final_oos_snapshot_id: str | None = None
+    market_ref_hash: str | None = None
+    content_ref_hash: str | None = None
+    content_manifest: dict | None = None
+    final_oos_dataset_ref_hash: str | None = None
+    final_oos_dataset_ref: dict | None = None
     config_hash: str = ""
     candidate_budget: int = 50
     round_limit: int = 1
@@ -57,6 +63,11 @@ class ResearchExperiment:
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     frozen_at: str | None = None
     oos_evaluated_at: str | None = None
+    # Immutable admission evidence captured before formal data loading/OOS.
+    readiness_evidence: dict | None = None
+    readiness_evidence_hash: str | None = None
+    readiness_frozen_at: str | None = None
+    readiness_threshold_version: str | None = None
 
     def transition(self, new_status: str) -> None:
         if self.status in _TERMINAL:

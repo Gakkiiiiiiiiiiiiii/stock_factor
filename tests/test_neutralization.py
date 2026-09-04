@@ -1,4 +1,5 @@
 """Neutralization（详细修改方案 §7）。"""
+
 from __future__ import annotations
 
 import numpy as np

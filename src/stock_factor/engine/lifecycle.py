@@ -53,7 +53,11 @@ RESEARCH_STATUS_TRANSITIONS: dict[FactorResearchStatus, set[FactorResearchStatus
     },
     FactorResearchStatus.OOS_PASSED: {FactorResearchStatus.PROMOTED, FactorResearchStatus.INVALIDATED},
     FactorResearchStatus.OOS_FAILED: {FactorResearchStatus.RETIRED, FactorResearchStatus.INVALIDATED},
-    FactorResearchStatus.PROMOTED: {FactorResearchStatus.ACTIVE, FactorResearchStatus.DEGRADED, FactorResearchStatus.INVALIDATED},
+    FactorResearchStatus.PROMOTED: {
+        FactorResearchStatus.ACTIVE,
+        FactorResearchStatus.DEGRADED,
+        FactorResearchStatus.INVALIDATED,
+    },
     FactorResearchStatus.ACTIVE: {FactorResearchStatus.DEGRADED, FactorResearchStatus.RETIRED},
     FactorResearchStatus.DEGRADED: {FactorResearchStatus.ACTIVE, FactorResearchStatus.RETIRED},
     FactorResearchStatus.RETIRED: set(),

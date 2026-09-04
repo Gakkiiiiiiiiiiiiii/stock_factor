@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,8 @@ def load_gold_set(path: str | Path) -> list[GoldSetRecord]:
 
 
 def cohens_kappa(annotator_a: list[int], annotator_b: list[int]) -> float:
-    a = np.asarray(annotator_a); b = np.asarray(annotator_b)
+    a = np.asarray(annotator_a)
+    b = np.asarray(annotator_b)
     if a.shape != b.shape or a.size == 0:
         raise ValueError("annotator arrays must have the same non-empty shape")
     observed = float(np.mean(a == b))
@@ -54,9 +55,23 @@ def validate_gold_set(records: list[GoldSetRecord], *, min_kappa: float = 0.60) 
     result: dict[str, Any] = {"sample_count": len(records), "frozen": True, "kappa": {}}
     keys = sorted({key for item in records for key in item.labels})
     for key in keys:
-        paired = [item for item in records if item.annotator_a_labels and item.annotator_b_labels and key in item.annotator_a_labels and key in item.annotator_b_labels]
+        paired = [
+            item
+            for item in records
+            if item.annotator_a_labels
+            and item.annotator_b_labels
+            and key in item.annotator_a_labels
+            and key in item.annotator_b_labels
+        ]
         if paired:
-            result["kappa"][key] = cohens_kappa([int(item.annotator_a_labels[key]) for item in paired], [int(item.annotator_b_labels[key]) for item in paired])
+            result["kappa"][key] = cohens_kappa(
+                [int(item.annotator_a_labels[key]) for item in paired],
+                [int(item.annotator_b_labels[key]) for item in paired],
+            )
     result["min_kappa"] = min_kappa
-    result["passed"] = bool(records) and bool(result["kappa"]) and all(value is not None and value >= min_kappa for value in result["kappa"].values())
+    result["passed"] = (
+        bool(records)
+        and bool(result["kappa"])
+        and all(value is not None and value >= min_kappa for value in result["kappa"].values())
+    )
     return result

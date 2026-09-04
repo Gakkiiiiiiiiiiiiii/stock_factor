@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -46,29 +46,6 @@ class FactorJobRow(Base):
     # §33 Idempotency-Key：避免重试产生重复挖掘任务
     idempotency_key: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class PaperStateRow(Base):
-    __tablename__ = "paper_state"
-    account_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    cash: Mapped[float] = mapped_column(Float, default=1_000_000)
-    positions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    frozen_orders: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    order_history: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    fill_history: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    risk_events: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
-    data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
-
-
-class PaperEquityRow(Base):
-    __tablename__ = "paper_equity"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    account_id: Mapped[str] = mapped_column(String(64), index=True)
-    as_of: Mapped[str] = mapped_column(String(32), index=True)
-    equity: Mapped[float] = mapped_column(Float)
-    cash: Mapped[float] = mapped_column(Float)
-    data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
 
 
 # Research V2 is intentionally normalised.  ``FactorRow.metrics`` remains a
@@ -158,14 +135,77 @@ class OosAuthorizationRow(Base):
     """
 
     __tablename__ = "oos_authorizations"
-    authorization_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: f"oosa-{uuid4().hex[:12]}")
+    authorization_id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: f"oosa-{uuid4().hex[:12]}"
+    )
     experiment_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     final_oos_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     candidate_set_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="AUTHORIZED", index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="AUTHORIZED", index=True)
+    dataset_ref_hash: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    market_snapshot_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    content_ref_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    active_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     authorized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OosEvaluationRunRow(Base):
+    __tablename__ = "oos_evaluation_runs"
+    run_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    authorization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oos_authorizations.authorization_id"), nullable=False, index=True
+    )
+    owner_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    fencing_token: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="STARTED", index=True)
+    lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    evaluator_version: Mapped[str] = mapped_column(String(128), nullable=False, default="final-oos-v1")
+    cohort_artifact_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OosCandidateCheckpointRow(Base):
+    __tablename__ = "oos_candidate_checkpoints"
+    checkpoint_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("oos_evaluation_runs.run_id"), nullable=False, index=True
+    )
+    candidate_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    input_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    result_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (UniqueConstraint("run_id", "candidate_id", name="uq_oos_checkpoint_run_candidate"),)
+
+
+class OosCohortArtifactRow(Base):
+    __tablename__ = "oos_cohort_artifacts"
+    artifact_hash: Mapped[str] = mapped_column(String(128), primary_key=True)
+    run_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("oos_evaluation_runs.run_id"), nullable=False, unique=True
+    )
+    authorization_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oos_authorizations.authorization_id"), nullable=False, index=True
+    )
+    artifact: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ResearchArtifactRow(Base):
+    """Immutable content-addressed ResearchArtifactV2 evidence."""
+
+    __tablename__ = "research_artifacts_v2"
+    artifact_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    contract_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    artifact_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class FactorSetRow(Base):
@@ -181,6 +221,8 @@ class FactorSetRow(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ACTIVE", index=True)
     code_sha: Mapped[str | None] = mapped_column(String(128), nullable=True)
     config_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    research_artifact_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    formal_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -244,74 +286,4 @@ class FactorLifecycleEventRow(Base):
     metrics_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     data_snapshot_id: Mapped[str | None] = mapped_column(String(128))
     actor: Mapped[str] = mapped_column(String(80), default="factor-miner")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class PaperRunRow(Base):
-    __tablename__ = "paper_run"
-    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    account_id: Mapped[str] = mapped_column(String(64), index=True)
-    trade_date: Mapped[date] = mapped_column(Date, index=True)
-    signal_snapshot_id: Mapped[str] = mapped_column(String(128))
-    data_snapshot_id: Mapped[str] = mapped_column(String(128))
-    fee_model_version: Mapped[str] = mapped_column(String(80), default="v1")
-    slippage_model_version: Mapped[str] = mapped_column(String(80), default="v1")
-    idempotency_key: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class PaperPositionLotRow(Base):
-    __tablename__ = "paper_position_lot"
-    lot_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    account_id: Mapped[str] = mapped_column(String(64), index=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    buy_date: Mapped[date] = mapped_column(Date)
-    quantity: Mapped[int] = mapped_column(Integer)
-    available_quantity: Mapped[int] = mapped_column(Integer)
-    cost_price: Mapped[float] = mapped_column(Float)
-    remaining_cost: Mapped[float] = mapped_column(Float)
-    opened_by_fill_id: Mapped[str | None] = mapped_column(String(64))
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class PaperOrderRow(Base):
-    __tablename__ = "paper_order_v2"
-    order_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    run_id: Mapped[str | None] = mapped_column(String(64), index=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(8))
-    requested_quantity: Mapped[int] = mapped_column(Integer, default=0)
-    filled_quantity: Mapped[int] = mapped_column(Integer, default=0)
-    remaining_quantity: Mapped[int] = mapped_column(Integer, default=0)
-    target_weight: Mapped[float | None] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(20), index=True)
-    blocked_reason: Mapped[str | None] = mapped_column(String(80))
-    execute_on: Mapped[date | None] = mapped_column(Date)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class PaperFillRow(Base):
-    __tablename__ = "paper_fill"
-    fill_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    order_id: Mapped[str] = mapped_column(String(128), index=True)
-    quantity: Mapped[int] = mapped_column(Integer)
-    price: Mapped[float] = mapped_column(Float)
-    gross_amount: Mapped[float] = mapped_column(Float)
-    commission: Mapped[float] = mapped_column(Float, default=0.0)
-    stamp_duty: Mapped[float] = mapped_column(Float, default=0.0)
-    slippage: Mapped[float] = mapped_column(Float, default=0.0)
-    net_cash_change: Mapped[float] = mapped_column(Float)
-    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class PaperCashLedgerRow(Base):
-    __tablename__ = "paper_cash_ledger"
-    entry_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    run_id: Mapped[str | None] = mapped_column(String(64), index=True)
-    event_type: Mapped[str] = mapped_column(String(30), index=True)
-    sequence: Mapped[int] = mapped_column(Integer, default=1)
-    amount: Mapped[float] = mapped_column(Float)
-    balance_before: Mapped[float] = mapped_column(Float, default=0.0)
-    balance_after: Mapped[float] = mapped_column(Float)
-    reference_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

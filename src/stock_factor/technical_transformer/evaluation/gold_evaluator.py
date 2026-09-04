@@ -14,7 +14,16 @@ from .metrics import event_metrics, soft_phase_metrics
 
 _EVENT_ALIASES = {name.lower(): name for name in EVENT_LABELS}
 _EVENT_ALIASES.update({name.removesuffix("_score").lower(): name for name in EVENT_LABELS})
-_EVENT_ALIASES.update({"spring": "spring_score", "ut": "upthrust_score", "sc": "sc_score", "bc": "bc_score", "sos": "sos_score", "sow": "sow_score"})
+_EVENT_ALIASES.update(
+    {
+        "spring": "spring_score",
+        "ut": "upthrust_score",
+        "sc": "sc_score",
+        "bc": "bc_score",
+        "sos": "sos_score",
+        "sow": "sow_score",
+    }
+)
 
 
 def _event_key(name: str) -> str | None:
@@ -48,7 +57,9 @@ def evaluate_gold_set(
     validation = validate_gold_set(records, min_kappa=min_kappa)
     base: dict[str, Any] = {
         "status": "GOLD_DATASET_INVALID" if not validation["passed"] else "EVALUATING",
-        "sample_count": len(records), "validation": validation, "kappa": validation.get("kappa", {}),
+        "sample_count": len(records),
+        "validation": validation,
+        "kappa": validation.get("kappa", {}),
         "allowed_splits": list(allowed_splits),
         "allowed_split_passed": bool(allowed_splits) and not bool(set(allowed_splits) & {"train", "valid"}),
         "gold_manifest": gold_manifest,
@@ -117,11 +128,13 @@ def evaluate_gold_set(
         event_prediction = torch.sigmoid(output["events"])[0].detach().cpu().numpy()
         if "technical_embedding" in output:
             embeddings.append(output["technical_embedding"][0].detach().cpu().numpy())
-        matched_event_labels.append({
-            canonical: int(float(value) > 0.5)
-            for key, value in record.labels.items()
-            if (canonical := _event_key(key)) is not None
-        })
+        matched_event_labels.append(
+            {
+                canonical: int(float(value) > 0.5)
+                for key, value in record.labels.items()
+                if (canonical := _event_key(key)) is not None
+            }
+        )
         for key, value in record.labels.items():
             canonical = _event_key(key)
             if canonical is not None:
@@ -144,10 +157,16 @@ def evaluate_gold_set(
     for name in EVENT_LABELS:
         if not event_targets[name]:
             continue
-        event_metrics_by_name[name] = event_metrics(np.asarray(event_targets[name]), np.asarray(event_predictions[name]))
+        event_metrics_by_name[name] = event_metrics(
+            np.asarray(event_targets[name]), np.asarray(event_predictions[name])
+        )
     display_names = {
-        "spring_score": "Spring", "upthrust_score": "UT", "sc_score": "SC",
-        "bc_score": "BC", "sos_score": "SOS", "sow_score": "SOW",
+        "spring_score": "Spring",
+        "upthrust_score": "UT",
+        "sc_score": "SC",
+        "bc_score": "BC",
+        "sos_score": "SOS",
+        "sow_score": "SOW",
     }
     coverage: dict[str, Any] = {}
     for name in EVENT_LABELS:
@@ -155,23 +174,44 @@ def evaluate_gold_set(
         positive = int(sum(value > 0.5 for value in values))
         negative = int(sum(value <= 0.5 for value in values))
         coverage[display_names.get(name, name)] = {
-            "positive": positive, "negative": negative,
-            "min_positive": int(min_positive_per_event), "min_negative": int(min_negative_per_event),
+            "positive": positive,
+            "negative": negative,
+            "min_positive": int(min_positive_per_event),
+            "min_negative": int(min_negative_per_event),
             "passed": positive >= min_positive_per_event and negative >= min_negative_per_event,
         }
     coverage_passed = all(item["passed"] for item in coverage.values())
-    aggregate = {key: _mean(list(event_metrics_by_name.values()), key) for key in ("pr_auc", "relative_pr", "pr_auc_multiple_of_prevalence", "f1", "precision", "recall", "precision_at_top1pct", "precision_at_top5pct", "ece")}
+    aggregate = {
+        key: _mean(list(event_metrics_by_name.values()), key)
+        for key in (
+            "pr_auc",
+            "relative_pr",
+            "pr_auc_multiple_of_prevalence",
+            "f1",
+            "precision",
+            "recall",
+            "precision_at_top1pct",
+            "precision_at_top5pct",
+            "ece",
+        )
+    }
     aggregate["status"] = "EVALUATED" if coverage_passed else "INCOMPLETE"
-    display_metrics = {display_names[name]: value for name, value in event_metrics_by_name.items() if name in display_names}
+    display_metrics = {
+        display_names[name]: value for name, value in event_metrics_by_name.items() if name in display_names
+    }
     gold_neighbor = _gold_neighbor_semantic_hit(np.asarray(embeddings), matched_event_labels)
-    base.update({
-        "status": "EVALUATED" if coverage_passed else "GOLD_EVENT_COVERAGE_INCOMPLETE",
-        "passed": bool(coverage_passed),
-        "coverage": coverage, "coverage_passed": bool(coverage_passed),
-        "event": {**event_metrics_by_name, **display_metrics, **aggregate},
-        "matched_count": len(matched_records), "exact_match": True,
-        "gold_neighbor_semantic_hit": gold_neighbor,
-    })
+    base.update(
+        {
+            "status": "EVALUATED" if coverage_passed else "GOLD_EVENT_COVERAGE_INCOMPLETE",
+            "passed": bool(coverage_passed),
+            "coverage": coverage,
+            "coverage_passed": bool(coverage_passed),
+            "event": {**event_metrics_by_name, **display_metrics, **aggregate},
+            "matched_count": len(matched_records),
+            "exact_match": True,
+            "gold_neighbor_semantic_hit": gold_neighbor,
+        }
+    )
     if phase_targets:
         base["phase"] = soft_phase_metrics(np.asarray(phase_targets), np.asarray(phase_predictions))
     return base
@@ -191,10 +231,17 @@ def _gold_neighbor_semantic_hit(embeddings: np.ndarray, labels: list[dict[str, i
         available = [name for name in event_names if name in item]
         if not available:
             continue
+        if not any(_gold_semantic_match(item, labels[peer], available) for peer in range(len(labels)) if peer != index):
+            # No compatible Gold peer exists for this anchor, so its nearest
+            # neighbor cannot provide an evaluable semantic comparison.
+            continue
         neighbor = int(np.argmax(similarity[index]))
-        positive_events = [name for name in available if item[name] == 1]
-        if positive_events:
-            hits.append(float(any(labels[neighbor].get(name, 0) == 1 for name in positive_events)))
-        else:
-            hits.append(float(all(item[name] == labels[neighbor].get(name, -1) for name in available)))
+        hits.append(float(_gold_semantic_match(item, labels[neighbor], available)))
     return float(np.mean(hits)) if hits else None
+
+
+def _gold_semantic_match(anchor: dict[str, int], candidate: dict[str, int], available: list[str]) -> bool:
+    positive_events = [name for name in available if anchor[name] == 1]
+    if positive_events:
+        return any(candidate.get(name, 0) == 1 for name in positive_events)
+    return all(anchor[name] == candidate.get(name, -1) for name in available)

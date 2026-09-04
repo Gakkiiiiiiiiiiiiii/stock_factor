@@ -1,9 +1,20 @@
 services:
   stock-factor:
-    build: .
+    build:
+      context: .
+      target: core
     env_file:
       - path: .env
         required: false
+    environment:
+      STOCK_FACTOR_CONFIG_ROOT: /app/config
+      FACTOR_RUNTIME_PROFILE: ${FACTOR_RUNTIME_PROFILE:-dev}
+      FACTOR_PAPER_AUTHORITY: ${FACTOR_PAPER_AUTHORITY:-quant}
+      ALLOW_LOCAL_PAPER: ${ALLOW_LOCAL_PAPER:-false}
+      FACTOR_REQUIRED_QUANT_CONTRACT: ${FACTOR_REQUIRED_QUANT_CONTRACT:-paper-account.v1}
+      FACTOR_REQUIRED_QUANT_CHECKSUM: ${FACTOR_REQUIRED_QUANT_CHECKSUM:-}
+      FACTOR_REQUIRED_CONTENT_CONTRACT: ${FACTOR_REQUIRED_CONTENT_CONTRACT:-content-factor-signal.v5.1}
+      FACTOR_REQUIRED_CONTENT_CHECKSUM: ${FACTOR_REQUIRED_CONTENT_CHECKSUM:-}
     ports:
       - "8200:8200"
     depends_on:
@@ -11,14 +22,50 @@ services:
         condition: service_healthy
 
   stock-factor-worker:
-    build: .
+    build:
+      context: .
+      target: worker
     env_file:
       - path: .env
         required: false
-    command: ["stock-factor-worker"]
+    environment:
+      STOCK_FACTOR_CONFIG_ROOT: /app/config
+      FACTOR_RUNTIME_PROFILE: ${FACTOR_RUNTIME_PROFILE:-dev}
+      FACTOR_PAPER_AUTHORITY: ${FACTOR_PAPER_AUTHORITY:-quant}
+      ALLOW_LOCAL_PAPER: ${ALLOW_LOCAL_PAPER:-false}
+      FACTOR_REQUIRED_QUANT_CONTRACT: ${FACTOR_REQUIRED_QUANT_CONTRACT:-paper-account.v1}
+      FACTOR_REQUIRED_QUANT_CHECKSUM: ${FACTOR_REQUIRED_QUANT_CHECKSUM:-}
+      FACTOR_REQUIRED_CONTENT_CONTRACT: ${FACTOR_REQUIRED_CONTENT_CONTRACT:-content-factor-signal.v5.1}
+      FACTOR_REQUIRED_CONTENT_CHECKSUM: ${FACTOR_REQUIRED_CONTENT_CHECKSUM:-}
+    command: ["python", "-m", "stock_factor.workers.factor_worker"]
     depends_on:
       postgres:
         condition: service_healthy
+
+  stock-factor-ml-cpu:
+    profiles: [ml]
+    build:
+      context: .
+      target: ml-cpu
+    environment:
+      FACTOR_RUNTIME_PROFILE: ${FACTOR_RUNTIME_PROFILE:-dev}
+      FACTOR_PAPER_AUTHORITY: quant
+
+  stock-factor-ml-gpu:
+    profiles: [ml-gpu]
+    build:
+      context: .
+      target: ml-gpu
+    environment:
+      FACTOR_RUNTIME_PROFILE: ${FACTOR_RUNTIME_PROFILE:-dev}
+      FACTOR_PAPER_AUTHORITY: quant
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   postgres:
     image: postgres:16-alpine

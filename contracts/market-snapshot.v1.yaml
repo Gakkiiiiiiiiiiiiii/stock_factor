@@ -1,0 +1,14 @@
+# Formal Quant market snapshot consumer contract.
+contract_version: market-snapshot.v1
+service: quant
+consumer: stock_factor
+formal_path: POST /api/v1/market/bars/batch
+response_requirements:
+  - contract_version == market-snapshot.v1
+  - data.symbols / data.dates / data.bars / data.data_version / data.data_snapshot_id
+  - data.market_snapshot_ref contains the complete immutable manifest identity
+  - market_snapshot_ref.quality_seal == PASS
+  - market_snapshot_ref.ref_hash is canonical for all identity and range fields
+consumer_rules:
+  - formal consumers never retry a legacy/current/local endpoint
+  - exploratory legacy compatibility is not formal-eligible

@@ -1,4 +1,5 @@
 """Final OOS 真隔离测试（设计文档 §13 / §78 / §86 / 验收标准 Factor 部分）。"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -116,7 +117,9 @@ def test_final_oos_replay_returns_recorded_evaluation():
     store = InMemoryCandidateSealStore()
     service = FinalOosEvaluationService(store)
     split = build_research_split(DAYS, get_research_config().data_split, 5)
-    refs = derive_snapshot_refs("mds-x", (split.discovery_start, split.discovery_end), (split.final_oos_start, split.final_oos_end))
+    refs = derive_snapshot_refs(
+        "mds-x", (split.discovery_start, split.discovery_end), (split.final_oos_start, split.final_oos_end)
+    )
     freeze = CandidateFreeze(
         candidate_hash="cand-1",
         formula=["ret", "cs_rank"],

@@ -13,4 +13,3 @@ def test_invalid_endpoint_is_not_sampled_even_with_good_window_ratio() -> None:
     quality[-1] = 0.0
     config = DatasetConfig(step_len=128, stride=1, min_listing_days=160, min_quality_ratio=0.80)
     assert _eligible_samples(dates, listing_days, quality, config) == []
-
